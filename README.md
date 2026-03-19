@@ -13,7 +13,13 @@ better-eww runs headless Firefox (~100MB, bundled by Playwright) as a backend. I
 
 ## Installation
 
-### Elpaca
+<table>
+<tr>
+<td> <b>Elpaca</b> </td>
+<td> <b>straight.el</b> </td>
+</tr>
+<tr>
+<td>
 
 ```elisp
 (use-package better-eww
@@ -27,7 +33,8 @@ better-eww runs headless Firefox (~100MB, bundled by Playwright) as a backend. I
         better-eww-default-height 720))
 ```
 
-### straight.el
+</td>
+<td>
 
 ```elisp
 (use-package better-eww
@@ -40,6 +47,10 @@ better-eww runs headless Firefox (~100MB, bundled by Playwright) as a backend. I
         better-eww-default-width 1280
         better-eww-default-height 720))
 ```
+
+</td>
+</tr>
+</table>
 
 ### Manual
 
