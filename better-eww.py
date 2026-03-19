@@ -120,6 +120,24 @@ async def main():
                 pass
             return {"ok": True}
 
+        if cmd == "mousedown":
+            await page.mouse.move(params["x"], params["y"])
+            await page.mouse.down()
+            return {"ok": True}
+
+        if cmd == "mouseup":
+            await page.mouse.move(params["x"], params["y"])
+            await page.mouse.up()
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=5000)
+            except Exception:
+                pass
+            return {"ok": True}
+
+        if cmd == "dblclick":
+            await page.mouse.dblclick(params["x"], params["y"])
+            return {"ok": True}
+
         if cmd == "type":
             await page.keyboard.type(params["text"])
             return {"ok": True}

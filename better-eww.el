@@ -338,15 +338,44 @@ This does NOT remove the Emacs package itself — use your package manager for t
   (when (buffer-live-p better-eww--buffer)
     (kill-buffer better-eww--buffer)))
 
-(defun better-eww-click (event)
-  "Handle a mouse click EVENT — forward coordinates to the browser."
+(defun better-eww-mouse-handler (event)
+  "Handle mouse press, track drag, and forward to browser."
+  (interactive "e")
+  (let* ((start-posn (event-start event))
+         (start-xy (posn-object-x-y start-posn))
+         (start-x (car start-xy))
+         (start-y (cdr start-xy)))
+    (when (and start-x start-y)
+      (better-eww--send `((cmd . "mousedown") (x . ,start-x) (y . ,start-y)) nil)
+      (let ((end-x start-x)
+            (end-y start-y)
+            (ev nil))
+        (track-mouse
+          (while (progn
+                   (setq ev (read-event))
+                   (mouse-movement-p ev))
+            (let* ((posn (event-start ev))
+                   (xy (posn-object-x-y posn)))
+              (when xy
+                (setq end-x (car xy) end-y (cdr xy))))))
+        ;; Get final position from release event if available.
+        (when (and ev (listp ev))
+          (let* ((posn (event-end ev))
+                 (xy (posn-object-x-y posn)))
+            (when xy
+              (setq end-x (car xy) end-y (cdr xy)))))
+        (better-eww--send `((cmd . "mouseup") (x . ,end-x) (y . ,end-y))
+                           #'better-eww--action-callback)))))
+
+(defun better-eww-double-click (event)
+  "Handle double-click EVENT — select word in browser."
   (interactive "e")
   (let* ((posn (event-start event))
          (xy (posn-object-x-y posn))
          (x (car xy))
          (y (cdr xy)))
     (when (and x y)
-      (better-eww--send `((cmd . "click") (x . ,x) (y . ,y))
+      (better-eww--send `((cmd . "dblclick") (x . ,x) (y . ,y))
                          #'better-eww--action-callback))))
 
 (defun better-eww-scroll-down (event)
@@ -588,6 +617,35 @@ This does NOT remove the Emacs package itself — use your package manager for t
   "Jump to a better-eww BOOKMARK."
   (better-eww-browse (alist-get 'url (cdr bookmark))))
 
+;; ── Clipboard bridge ──────────────────────────────────────────────
+
+(defun better-eww-copy ()
+  "Copy browser selection to Emacs kill ring and system clipboard."
+  (interactive)
+  (better-eww--send
+   '((cmd . "js") (expr . "window.getSelection().toString()"))
+   (lambda (resp)
+     (if-let* ((err (alist-get 'error resp)))
+         (message "better-eww copy error: %s" err)
+       (let ((text (alist-get 'result resp)))
+         (if (and text (not (equal text "")))
+             (progn
+               (kill-new text)
+               (message "Copied: %s" (truncate-string-to-width text 60)))
+           (message "better-eww: no selection to copy")))))))
+
+(defun better-eww-paste ()
+  "Paste from Emacs kill ring into the browser."
+  (interactive)
+  (let ((text (current-kill 0 t)))
+    (if (and text (not (string-empty-p text)))
+        (better-eww--send
+         `((cmd . "js")
+           (expr . ,(format "document.execCommand('insertText', false, %s)"
+                            (json-encode text))))
+         #'better-eww--action-callback)
+      (message "better-eww: kill ring empty"))))
+
 ;; ── Key forwarding ─────────────────────────────────────────────────
 
 (defun better-eww--translate-key (key)
@@ -662,11 +720,14 @@ This does NOT remove the Emacs package itself — use your package manager for t
     (define-key map (kbd "C-d") #'better-eww-self-insert)
     (define-key map (kbd "M-f") #'better-eww-self-insert)
     (define-key map (kbd "M-b") #'better-eww-self-insert)
+    (define-key map (kbd "M-w") #'better-eww-copy)
+    (define-key map (kbd "C-y") #'better-eww-paste)
     (define-key map (kbd "C-s") #'better-eww-isearch-forward)
     (define-key map (kbd "C-r") #'better-eww-isearch-backward)
 
     ;; Mouse → forward to browser.
-    (define-key map [mouse-1] #'better-eww-click)
+    (define-key map [down-mouse-1] #'better-eww-mouse-handler)
+    (define-key map [double-mouse-1] #'better-eww-double-click)
     (define-key map [wheel-down] #'better-eww-scroll-down)
     (define-key map [wheel-up] #'better-eww-scroll-up)
 
