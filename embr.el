@@ -83,6 +83,12 @@ Useful for sites that rely on press-and-hold interactions."
   :type '(choice (const :tag "Default (100px instant)" default)
                  (const :tag "Smooth (300px smooth)" smooth)))
 
+(defcustom embr-fullscreen-hack t
+  "When non-nil, fake the Fullscreen API with fixed positioning.
+Prevents HTML5 fullscreen video from overflowing the embr viewport in
+headless Firefox."
+  :type 'boolean)
+
 (defcustom embr-search-engine 'brave
   "Search engine for URL bar queries.
 Can be a symbol (`brave', `google', `duckduckgo') or a custom URL
@@ -945,7 +951,8 @@ If the daemon is already running, just navigate to the new URL."
                  `((cmd . "init")
                    (width . ,embr--viewport-width)
                    (height . ,embr--viewport-height)
-                   (fps . ,embr-fps)))))
+                   (fps . ,embr-fps)
+                   (fullscreen_hack . ,(if embr-fullscreen-hack t :json-false))))))
       (if (alist-get 'error resp)
           (error "embr: init failed: %s" (alist-get 'error resp))
         ;; Daemon tells us where it writes frames.

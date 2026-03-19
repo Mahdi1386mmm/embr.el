@@ -31,6 +31,7 @@ Emacs is the display server. Headless Firefox is the renderer.
         embr-search-engine 'brave       ; 'brave, 'google, 'duckduckgo, or custom URL with %s
         embr-click-method 'atomic       ; 'atomic or 'immediate (see Configuration below)
         embr-scroll-method 'default     ; 'default or 'smooth (see Configuration below)
+        embr-fullscreen-hack t          ; nil to use native (broken) fullscreen
         embr-external-command "yt-dlp -o - %s | mpv -")) ; Shell command for & key (%s = URL)
 ```
 
@@ -50,6 +51,7 @@ Emacs is the display server. Headless Firefox is the renderer.
         embr-search-engine 'brave       ; 'brave, 'google, 'duckduckgo, or custom URL with %s
         embr-click-method 'atomic       ; 'atomic or 'immediate (see Configuration below)
         embr-scroll-method 'default     ; 'default or 'smooth (see Configuration below)
+        embr-fullscreen-hack t          ; nil to use native (broken) fullscreen
         embr-external-command "yt-dlp -o - %s | mpv -")) ; Shell command for & key (%s = URL)
 ```
 
@@ -95,6 +97,7 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-search-engine` | `'brave` | `'brave`, `'google`, `'duckduckgo`, or custom URL with `%s` |
 | `embr-click-method` | `'atomic` | Click dispatch method (see below) |
 | `embr-scroll-method` | `'default` | Scroll behavior (see below) |
+| `embr-fullscreen-hack` | `t` | Fake Fullscreen API with fixed positioning (fixes video overflow) |
 | `embr-external-command` | `"yt-dlp -o - %s \| mpv -"` | Shell command for `&` key (`%s` = URL). e.g. `"mpv %s"`, `"chromium %s"` |
 
 ### Click methods

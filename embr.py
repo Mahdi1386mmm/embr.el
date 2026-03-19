@@ -77,6 +77,7 @@ async def main():
                 str(user_data_dir),
                 headless=True,
                 viewport={"width": width, "height": height},
+                screen={"width": width, "height": height},
                 accept_downloads=False,
             )
             # Ad blocking via request interception.
@@ -98,7 +99,58 @@ async def main():
                         await route.continue_()
                 await context.route("**/*", block_ads)
             target_fps = params.get("fps", 30)
+            fullscreen_hack = params.get("fullscreen_hack", False)
             page = context.pages[0] if context.pages else await context.new_page()
+            if fullscreen_hack:
+                await context.add_init_script("""
+                    (function() {
+                        let fsEl = null;
+                        const saved = new Map();
+                        Element.prototype.requestFullscreen = function() {
+                            fsEl = this;
+                            saved.set(this, this.getAttribute('style') || '');
+                            this.style.setProperty('position', 'fixed', 'important');
+                            this.style.setProperty('top', '0', 'important');
+                            this.style.setProperty('left', '0', 'important');
+                            this.style.setProperty('width', '100vw', 'important');
+                            this.style.setProperty('height', '100vh', 'important');
+                            this.style.setProperty('z-index', '2147483647', 'important');
+                            this.style.setProperty('background', '#000', 'important');
+                            const vid = this.querySelector('video');
+                            if (vid) {
+                                saved.set(vid, vid.getAttribute('style') || '');
+                                vid.style.setProperty('width', '100%', 'important');
+                                vid.style.setProperty('height', '100%', 'important');
+                                vid.style.setProperty('object-fit', 'contain', 'important');
+                            }
+                            Object.defineProperty(document, 'fullscreenElement', {
+                                get: () => fsEl, configurable: true
+                            });
+                            this.dispatchEvent(new Event('fullscreenchange', {bubbles: true}));
+                            document.dispatchEvent(new Event('fullscreenchange'));
+                            return Promise.resolve();
+                        };
+                        document.exitFullscreen = function() {
+                            if (fsEl) {
+                                const origStyle = saved.get(fsEl);
+                                if (origStyle !== undefined) fsEl.setAttribute('style', origStyle);
+                                else fsEl.removeAttribute('style');
+                                const vid = fsEl.querySelector('video');
+                                if (vid) {
+                                    const vs = saved.get(vid);
+                                    if (vs !== undefined) vid.setAttribute('style', vs);
+                                    else vid.removeAttribute('style');
+                                }
+                                fsEl = null;
+                                Object.defineProperty(document, 'fullscreenElement', {
+                                    get: () => null, configurable: true
+                                });
+                                document.dispatchEvent(new Event('fullscreenchange'));
+                            }
+                            return Promise.resolve();
+                        };
+                    })();
+                """)
             loop_task = asyncio.create_task(screenshot_loop())
             return {"ok": True, "frame_path": FRAME_PATH}
 
@@ -263,8 +315,14 @@ async def main():
             return {"error": f"tab index out of range: {idx}"}
 
         if cmd == "resize":
-            await page.set_viewport_size(
-                {"width": params["width"], "height": params["height"]}
+            w, h = params["width"], params["height"]
+            await page.set_viewport_size({"width": w, "height": h})
+            # Keep screen size in sync so Fullscreen API uses viewport dims.
+            await page.evaluate(
+                f"Object.defineProperty(screen,'availWidth',{{get:()=>{w}}});"
+                f"Object.defineProperty(screen,'availHeight',{{get:()=>{h}}});"
+                f"Object.defineProperty(screen,'width',{{get:()=>{w}}});"
+                f"Object.defineProperty(screen,'height',{{get:()=>{h}}});"
             )
             return {"ok": True}
 
