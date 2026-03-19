@@ -97,7 +97,7 @@ Useful for sites that rely on press-and-hold interactions."
                  (const :tag "Instant (100px instant)" instant)))
 
 
-(defcustom embr-search-engine 'brave
+(defcustom embr-search-engine 'google
   "Search engine for URL bar queries.
 Can be a symbol (`brave', `google', `duckduckgo') or a custom URL
 string with %s for the query."

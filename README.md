@@ -19,15 +19,15 @@ Emacs is the display server. Headless Firefox is the renderer.
            :repo "emacs-os/embr.el"
            :files ("*.el" "*.py" "*.sh"))
   :config
-  (setq embr-fps 60                    ; Target FPS (try 30 if your machine struggles)
-        embr-default-width 1280         ; Viewport width in pixels
-        embr-default-height 720         ; Viewport height in pixels
-        embr-screen-width 1920          ; Screen width reported to websites
-        embr-screen-height 1080         ; Screen height reported to websites
-        embr-search-engine 'brave       ; 'brave, 'google, 'duckduckgo, or custom URL with %s
-        embr-click-method 'atomic       ; 'atomic or 'immediate (see Configuration below)
-        embr-scroll-method 'smooth      ; 'smooth or 'instant (see Configuration below)
-        embr-external-command "yt-dlp --cookies-from-browser firefox:~/.local/share/embr/firefox-profile -o - %s | mpv -")) ; Shell command for & key (%s = URL)
+  (setq embr-fps 60
+        embr-default-width 1280
+        embr-default-height 720
+        embr-screen-width 1920
+        embr-screen-height 1080
+        embr-search-engine 'google
+        embr-click-method 'atomic
+        embr-scroll-method 'smooth
+        embr-external-command "yt-dlp --cookies-from-browser firefox:~/.local/share/embr/firefox-profile -o - %s | mpv -"))
 ```
 
 **straight.el**
@@ -39,15 +39,15 @@ Emacs is the display server. Headless Firefox is the renderer.
              :repo "emacs-os/embr.el"
              :files ("*.el" "*.py" "*.sh"))
   :config
-  (setq embr-fps 60                    ; Target FPS (try 30 if your machine struggles)
-        embr-default-width 1280         ; Viewport width in pixels
-        embr-default-height 720         ; Viewport height in pixels
-        embr-screen-width 1920          ; Screen width reported to websites
-        embr-screen-height 1080         ; Screen height reported to websites
-        embr-search-engine 'brave       ; 'brave, 'google, 'duckduckgo, or custom URL with %s
-        embr-click-method 'atomic       ; 'atomic or 'immediate (see Configuration below)
-        embr-scroll-method 'smooth      ; 'smooth or 'instant (see Configuration below)
-        embr-external-command "yt-dlp --cookies-from-browser firefox:~/.local/share/embr/firefox-profile -o - %s | mpv -")) ; Shell command for & key (%s = URL)
+  (setq embr-fps 60
+        embr-default-width 1280
+        embr-default-height 720
+        embr-screen-width 1920
+        embr-screen-height 1080
+        embr-search-engine 'google
+        embr-click-method 'atomic
+        embr-scroll-method 'smooth
+        embr-external-command "yt-dlp --cookies-from-browser firefox:~/.local/share/embr/firefox-profile -o - %s | mpv -"))
 ```
 
 **Tip:** Make embr your default Emacs browser and enable clickable URLs everywhere:
@@ -94,24 +94,11 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-default-height` | `720` | Viewport height in pixels |
 | `embr-screen-width` | `1920` | Screen width reported to websites (should be >= viewport) |
 | `embr-screen-height` | `1080` | Screen height reported to websites (should be >= viewport) |
-| `embr-search-engine` | `'brave` | `'brave`, `'google`, `'duckduckgo`, or custom URL with `%s` |
-| `embr-click-method` | `'atomic` | Click dispatch method (see below) |
-| `embr-scroll-method` | `'smooth` | Scroll behavior (see below) |
+| `embr-search-engine` | `'google` | `'google`, `'brave`, `'duckduckgo`, or custom URL with `%s` |
+| `embr-click-method` | `'atomic` | `'atomic` defers mousedown until drag detected, better iframe compat. `'immediate` sends mousedown instantly, for press-and-hold sites. |
+| `embr-scroll-method` | `'smooth` | `'smooth` scrolls 300px animated. `'instant` scrolls 100px, choppy line-by-line. |
 | `embr-external-command` | `"yt-dlp --cookies-from-browser firefox:~/.local/share/embr/firefox-profile -o - %s \| mpv -"` | Shell command for `&` key (`%s` = URL). Uses embr's cookies so logged-in sessions work. |
 
-### Click methods
-
-| Method | Behavior |
-|--------|----------|
-| `'atomic` | Defers mousedown until drag is detected. Simple clicks use Playwright's atomic `page.mouse.click()`. Better compatibility with iframe widgets. |
-| `'immediate` | Sends mousedown instantly on press, mouseup on release. Useful for sites that rely on press-and-hold interactions. |
-
-### Scroll methods
-
-| Method | Behavior |
-|--------|----------|
-| `'smooth` | 300px smooth-animated scroll per wheel tick. |
-| `'instant` | 100px instant scroll per wheel tick. Choppy, line-by-line feel. |
 
 ## Usage
 
@@ -208,8 +195,5 @@ No plans to add this upstream, but PRs are welcome. If you implement it, gate it
 
 ### Does this work on macOS?
 
-Unknown — embr is developed and tested on Linux. Camoufox and headless Firefox should work on macOS, but no one has tried it yet. If you get it working (or not), please open an issue or PR.
+Unknown. Let us know.
 
-### YouTube videos error after a few minutes
-
-YouTube detects the headless browser and kills playback. Press `&` to play the video through yt-dlp + mpv instead — it bypasses detection entirely and gives better quality since mpv gets the direct video stream.
