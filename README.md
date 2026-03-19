@@ -15,7 +15,8 @@ A real web browser inside Emacs. Runs headless Firefox via Playwright, displays 
 (use-package better-eww
   :defer t
   :ensure (:host github
-           :repo "emacs-os/better-eww")
+           :repo "emacs-os/better-eww"
+           :files ("*.el" "*.py" "*.sh"))
   :config
   (setq better-eww-fps 30
         better-eww-default-width 1280
@@ -28,7 +29,8 @@ A real web browser inside Emacs. Runs headless Firefox via Playwright, displays 
 (use-package better-eww
   :defer t
   :straight (:host github
-             :repo "emacs-os/better-eww")
+             :repo "emacs-os/better-eww"
+             :files ("*.el" "*.py" "*.sh"))
   :config
   (setq better-eww-fps 30
         better-eww-default-width 1280

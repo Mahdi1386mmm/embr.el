@@ -26,15 +26,10 @@
   :prefix "better-eww-")
 
 (defvar better-eww--directory
-  (file-name-directory
-   (file-truename
-    (or (locate-library "better-eww.el" t)
-        load-file-name
-        buffer-file-name)))
-  "Directory where better-eww source lives (resolved through symlinks).
-Elpaca/straight symlink the .el into a builds dir; `locate-library'
-finds that symlink and `file-truename' resolves it back to the repo
-where .py, .venv, and setup.sh live.")
+  (file-name-directory (or load-file-name buffer-file-name))
+  "Directory where better-eww package files live.
+With :files in the package recipe, Elpaca/straight symlink .py and .sh
+alongside the .el in the builds dir, so this just works.")
 
 (defcustom better-eww-python
   (expand-file-name ".venv/bin/python" better-eww--directory)
