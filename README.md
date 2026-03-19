@@ -184,12 +184,7 @@ Browser sessions persist across restarts. Cookies and login state are stored in 
 
 ![Google sign-in blocked](assets/google-sign-in-blocked.png)
 
-Google detects and blocks automated/headless browsers. This is a Google-side restriction, not a bug.
-
-**Workarounds:**
-- Use app passwords or sign into Google in a regular browser first, then export/import cookies
-- Sign in via a site that uses Google OAuth but is less strict about browser fingerprinting
-- Most other sites (Discord, Reddit, GitHub, etc.) work fine
+Google detects and blocks automated/headless browsers. This is a Google-side restriction, not a bug. Most other sites (Discord, Reddit, GitHub, etc.) work fine.
 
 ### Does audio/video work?
 
