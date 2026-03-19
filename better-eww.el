@@ -378,19 +378,20 @@ This does NOT remove the Emacs package itself — use your package manager for t
 
 (defun better-eww--read-hint ()
   "Read a hint tag from the user and click it."
-  (let* ((tags (mapcar (lambda (h) (alist-get 'tag h)) better-eww--hints))
-         (descriptions (mapcar (lambda (h)
+  (let* ((descriptions (mapcar (lambda (h)
                                  (format "%s: %s" (alist-get 'tag h)
                                          (alist-get 'text h)))
                                better-eww--hints))
-         (chosen (completing-read "Hint: " descriptions nil t)))
-    ;; Extract the tag from "tag: description".
-    (when (string-match "\\`\\([^:]+\\):" chosen)
+         (chosen (condition-case nil
+                     (completing-read "Hint: " descriptions nil t)
+                   (quit nil))))
+    ;; Always clear hints, whether user picked one or cancelled.
+    (better-eww--send '((cmd . "hints-clear")) nil)
+    (when (and chosen (string-match "\\`\\([^:]+\\):" chosen))
       (let* ((tag (match-string 1 chosen))
              (hint (seq-find (lambda (h) (string= (alist-get 'tag h) tag))
                              better-eww--hints)))
         (when hint
-          (better-eww--send '((cmd . "hints-clear")) nil)
           (better-eww--send `((cmd . "click")
                                (x . ,(alist-get 'x hint))
                                (y . ,(alist-get 'y hint)))
@@ -423,18 +424,42 @@ This does NOT remove the Emacs package itself — use your package manager for t
 
 ;; ── Find in page ───────────────────────────────────────────────────
 
-(defun better-eww-find (query)
-  "Highlight QUERY on the page using the browser's built-in find."
-  (interactive "sFind: ")
-  (better-eww--send
-   `((cmd . "js")
-     (expr . ,(format "window.find('%s')"
-                      (replace-regexp-in-string "'" "\\\\'" query))))
-   (lambda (resp)
-     (if-let* ((err (alist-get 'error resp)))
-         (message "better-eww find error: %s" err)
-       (unless (eq (alist-get 'result resp) t)
-         (message "better-eww: not found"))))))
+(defvar better-eww--search-query "" "Current find-in-page query.")
+
+(defun better-eww--find-on-page (backwards)
+  "Run window.find() with the current search query.  Search BACKWARDS if non-nil."
+  (let ((escaped (replace-regexp-in-string "'" "\\\\'" better-eww--search-query)))
+    (better-eww--send
+     `((cmd . "js")
+       (expr . ,(format "window.find('%s', false, %s, true)"
+                        escaped (if backwards "true" "false"))))
+     (lambda (resp)
+       (if-let* ((err (alist-get 'error resp)))
+           (message "better-eww find error: %s" err)
+         (when (eq (alist-get 'result resp) :json-false)
+           (message "better-eww: no more matches")))))))
+
+(defun better-eww-isearch-forward ()
+  "Search forward.  First call prompts for query; repeating finds next match."
+  (interactive)
+  (if (and (memq last-command '(better-eww-isearch-forward better-eww-isearch-backward))
+           (not (string-empty-p better-eww--search-query)))
+      (better-eww--find-on-page nil)
+    (let ((query (read-string "Search: " better-eww--search-query)))
+      (unless (string-empty-p query)
+        (setq better-eww--search-query query)
+        (better-eww--find-on-page nil)))))
+
+(defun better-eww-isearch-backward ()
+  "Search backward.  First call prompts for query; repeating finds previous match."
+  (interactive)
+  (if (and (memq last-command '(better-eww-isearch-forward better-eww-isearch-backward))
+           (not (string-empty-p better-eww--search-query)))
+      (better-eww--find-on-page t)
+    (let ((query (read-string "Search backward: " better-eww--search-query)))
+      (unless (string-empty-p query)
+        (setq better-eww--search-query query)
+        (better-eww--find-on-page t)))))
 
 ;; ── Tabs ───────────────────────────────────────────────────────────
 
@@ -480,7 +505,7 @@ This does NOT remove the Emacs package itself — use your package manager for t
                                               #'better-eww--action-callback))))))
 
 (defun better-eww-list-tabs ()
-  "Show all tabs in the echo area."
+  "List all tabs and switch to the selected one."
   (interactive)
   (better-eww--send '((cmd . "list-tabs"))
                      (lambda (resp)
@@ -493,8 +518,12 @@ This does NOT remove the Emacs package itself — use your package manager for t
                                                  (if (eq (alist-get 'active tab) t) "*" " ")
                                                  (alist-get 'index tab)
                                                  (or (alist-get 'title tab) (alist-get 'url tab))))
-                                       tabs)))
-                           (message "Tabs:\n%s" (string-join strs "\n")))))))
+                                       tabs))
+                                (chosen (completing-read "Tab: " strs nil t)))
+                           (when (string-match "\\*?\\([0-9]+\\):" chosen)
+                             (let ((idx (string-to-number (match-string 1 chosen))))
+                               (better-eww--send `((cmd . "switch-tab") (index . ,idx))
+                                                  #'better-eww--action-callback))))))))
 
 ;; ── Form fill ──────────────────────────────────────────────────────
 
@@ -527,6 +556,15 @@ This does NOT remove the Emacs package itself — use your package manager for t
     ("SPC" " ")
     ("C-v" "PageDown")
     ("M-v" "PageUp")
+    ("C-n" "ArrowDown")
+    ("C-p" "ArrowUp")
+    ("C-b" "ArrowLeft")
+    ("C-f" "ArrowRight")
+    ("C-a" "Home")
+    ("C-e" "End")
+    ("C-d" "Delete")
+    ("M-f" "Control+ArrowRight")
+    ("M-b" "Control+ArrowLeft")
     ("<backspace>" "Backspace")
     ("<return>" "Enter")
     ("<tab>" "Tab")
@@ -567,9 +605,21 @@ This does NOT remove the Emacs package itself — use your package manager for t
                    "<prior>" "<next>" "<escape>"))
       (define-key map (kbd key) #'better-eww-self-insert))
 
-    ;; Emacs scroll keys → browser page up/down.
+    ;; Emacs-style convenience bindings.
     (define-key map (kbd "C-v") #'better-eww-self-insert)
     (define-key map (kbd "M-v") #'better-eww-self-insert)
+    (define-key map (kbd "C-l") #'better-eww-navigate)
+    (define-key map (kbd "C-n") #'better-eww-self-insert)
+    (define-key map (kbd "C-p") #'better-eww-self-insert)
+    (define-key map (kbd "C-b") #'better-eww-self-insert)
+    (define-key map (kbd "C-f") #'better-eww-self-insert)
+    (define-key map (kbd "C-a") #'better-eww-self-insert)
+    (define-key map (kbd "C-e") #'better-eww-self-insert)
+    (define-key map (kbd "C-d") #'better-eww-self-insert)
+    (define-key map (kbd "M-f") #'better-eww-self-insert)
+    (define-key map (kbd "M-b") #'better-eww-self-insert)
+    (define-key map (kbd "C-s") #'better-eww-isearch-forward)
+    (define-key map (kbd "C-r") #'better-eww-isearch-backward)
 
     ;; Mouse → forward to browser.
     (define-key map [mouse-1] #'better-eww-click)
@@ -582,12 +632,13 @@ This does NOT remove the Emacs package itself — use your package manager for t
     (define-key map (kbd "C-c b") #'better-eww-back)
     (define-key map (kbd "C-c f") #'better-eww-forward)
     (define-key map (kbd "C-c q") #'better-eww-quit)
+    (define-key map (kbd "C-c C-k") #'better-eww-quit)
     (define-key map (kbd "C-c +") #'better-eww-zoom-in)
     (define-key map (kbd "C-c -") #'better-eww-zoom-out)
     (define-key map (kbd "C-c h") #'better-eww-follow-hint)
     (define-key map (kbd "C-c t") #'better-eww-view-text)
     (define-key map (kbd "C-c w") #'better-eww-copy-url)
-    (define-key map (kbd "C-c s") #'better-eww-find)
+    (define-key map (kbd "C-c s") #'better-eww-isearch-forward)
     (define-key map (kbd "C-c n") #'better-eww-new-tab)
     (define-key map (kbd "C-c d") #'better-eww-close-tab)
     (define-key map (kbd "C-c ]") #'better-eww-next-tab)

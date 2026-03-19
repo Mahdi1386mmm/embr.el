@@ -95,6 +95,18 @@ All keys are forwarded directly to the browser. Typing, arrows, backspace, tab, 
 
 | Key | Action |
 |-----|--------|
+| `C-l` | Go to URL (with history completion) |
+| `C-b` | Left arrow |
+| `C-f` | Right arrow |
+| `C-n` | Down arrow |
+| `C-p` | Up arrow |
+| `C-a` | Home |
+| `C-e` | End |
+| `C-d` | Delete forward |
+| `M-f` | Word forward |
+| `M-b` | Word backward |
+| `C-s` | Search forward (isearch-style) |
+| `C-r` | Search backward (isearch-style) |
 | `C-v` | Page down |
 | `M-v` | Page up |
 | `C-x` | Emacs prefix (not forwarded) |
@@ -112,7 +124,7 @@ Browser commands use the `C-c` prefix.
 | `C-c r` | Refresh |
 | `C-c b` | Back |
 | `C-c f` | Forward |
-| `C-c s` | Find in page |
+| `C-c s` | Search forward (same as `C-s`) |
 | `C-c t` | View page text in a separate buffer |
 | `C-c w` | Copy current URL to kill ring |
 | `C-c :` | Execute JavaScript |

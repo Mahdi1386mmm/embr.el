@@ -169,9 +169,13 @@ async def main():
                     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
                 });
                 const chars = 'asdfghjkl';
-                function label(i) {
-                    if (i < chars.length) return chars[i];
-                    return chars[Math.floor(i / chars.length) - 1] + chars[i % chars.length];
+                function label(n) {
+                    let s = '';
+                    do {
+                        s = chars[n % chars.length] + s;
+                        n = Math.floor(n / chars.length) - 1;
+                    } while (n >= 0);
+                    return s;
                 }
                 const results = [];
                 els.forEach((el, i) => {
