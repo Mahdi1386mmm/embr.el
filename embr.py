@@ -29,7 +29,6 @@ def load_blocklist():
 
 async def main():
     from playwright.async_api import async_playwright
-
     pw = await async_playwright().start()
     context = None
     page = None

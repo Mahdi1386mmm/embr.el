@@ -218,6 +218,8 @@ That said, embr does take basic measures to reduce fingerprinting and look like 
 - User-Agent is real Firefox (comes from Playwright's bundled Firefox)
 - Cookies and sessions persist across restarts (real browser profile)
 
+Ultimately, headless browsers are used by a lot of both good and bad bots, and a downside of this approach is that sometimes you'll get treated like one. In practice this mostly only affects large corporate sites (Google, Cloudflare-protected pages). Most of the web works fine — GitHub, Discord, and many others work without issues. We can't be playing cat and mouse trying to make this solution something that it's not.
+
 ### Fullscreen video
 
 YouTube fullscreen works thanks to `embr-fullscreen-hack` (enabled by default), which intercepts the Fullscreen API and fakes it with CSS fixed positioning. YouTube without being logged in can still be uncooperative — throttling, interruptions, etc.
