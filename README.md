@@ -25,10 +25,11 @@ Emacs is the display server. Headless Firefox is the renderer.
            :repo "emacs-os/embr.el"
            :files ("*.el" "*.py" "*.sh"))
   :config
-  (setq embr-fps 30
-        embr-default-width 1280
-        embr-default-height 720
-        embr-search-engine 'brave))
+  (setq embr-fps 30                    ; Target frames per second
+        embr-default-width 1280         ; Viewport width in pixels
+        embr-default-height 720         ; Viewport height in pixels
+        embr-search-engine 'brave       ; 'brave, 'google, 'duckduckgo, or custom URL with %s
+        embr-external-player "mpv"))    ; Media player for & key (receives yt-dlp output via pipe)
 ```
 
 </td>
@@ -41,10 +42,11 @@ Emacs is the display server. Headless Firefox is the renderer.
              :repo "emacs-os/embr.el"
              :files ("*.el" "*.py" "*.sh"))
   :config
-  (setq embr-fps 30
-        embr-default-width 1280
-        embr-default-height 720
-        embr-search-engine 'brave))
+  (setq embr-fps 30                    ; Target frames per second
+        embr-default-width 1280         ; Viewport width in pixels
+        embr-default-height 720         ; Viewport height in pixels
+        embr-search-engine 'brave       ; 'brave, 'google, 'duckduckgo, or custom URL with %s
+        embr-external-player "mpv"))    ; Media player for & key (receives yt-dlp output via pipe)
 ```
 
 </td>
@@ -78,16 +80,6 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | Cookies & sessions | `~/.local/share/embr/firefox-profile/` |
 
 `M-x embr-uninstall` cleans up all of the above.
-
-## Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `embr-fps` | `30` | Target frames per second |
-| `embr-default-width` | `1280` | Viewport width in pixels |
-| `embr-default-height` | `720` | Viewport height in pixels |
-| `embr-search-engine` | `'brave` | `'brave`, `'google`, `'duckduckgo`, or a custom URL string with `%s` |
-| `embr-external-player` | `"mpv"` | Media player for `&` key (receives yt-dlp output via pipe) |
 
 ## Usage
 
