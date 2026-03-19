@@ -657,10 +657,12 @@ Better compatibility with iframe widgets like Cloudflare Turnstile."
 ;; ── Tabs ───────────────────────────────────────────────────────────
 
 (defun embr-new-tab (url)
-  "Open URL in a new tab."
-  (interactive "sURL for new tab: ")
-  (embr--send `((cmd . "new-tab") (url . ,url))
-                     #'embr--action-callback))
+  "Open URL in a new tab, or search if input doesn't look like a URL."
+  (interactive (list (completing-read "URL/Search for new tab: " embr--url-history nil nil nil
+                                      'embr--url-history)))
+  (let ((target (embr--maybe-search-url url)))
+    (embr--send `((cmd . "new-tab") (url . ,target))
+                       #'embr--action-callback)))
 
 (defun embr-close-tab ()
   "Close the current tab."
