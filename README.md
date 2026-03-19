@@ -29,7 +29,7 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
         embr-search-engine 'google
         embr-click-method 'atomic
         embr-scroll-method 'smooth
-        embr-external-command "yt-dlp --cookies-from-browser firefox:~/.local/share/embr/firefox-profile -o - %s | mpv -"))
+        embr-external-command "yt-dlp -o - %s | mpv -"))
 ```
 
 **straight.el**
@@ -49,7 +49,7 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
         embr-search-engine 'google
         embr-click-method 'atomic
         embr-scroll-method 'smooth
-        embr-external-command "yt-dlp --cookies-from-browser firefox:~/.local/share/embr/firefox-profile -o - %s | mpv -"))
+        embr-external-command "yt-dlp -o - %s | mpv -"))
 ```
 
 **Tip:** Make embr your default Emacs browser and enable clickable URLs everywhere:
@@ -99,7 +99,7 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-search-engine` | symbol/string | `'google` | `'google`, `'brave`, `'duckduckgo`, or custom URL with `%s` |
 | `embr-click-method` | symbol | `'atomic` | `'atomic` defers mousedown until drag detected, better iframe compat. `'immediate` sends mousedown instantly, for press-and-hold sites. |
 | `embr-scroll-method` | symbol | `'smooth` | `'smooth` scrolls 300px animated. `'instant` scrolls 100px, choppy line-by-line. |
-| `embr-external-command` | string | yt-dlp + mpv | Shell command for `&` key (`%s` = URL). Default pipes through yt-dlp into mpv using embr's cookies. |
+| `embr-external-command` | string | yt-dlp + mpv | Shell command for `&` key (`%s` = URL). Default pipes through yt-dlp into mpv. |
 
 
 ## Usage

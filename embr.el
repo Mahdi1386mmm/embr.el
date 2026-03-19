@@ -70,12 +70,13 @@ realistic browser fingerprint."
   "Target frames per second for the screenshot stream."
   :type 'integer)
 
-(defcustom embr-external-command "yt-dlp --cookies-from-browser firefox:~/.local/share/embr/firefox-profile -o - %s | mpv -"
+(defcustom embr-external-command "yt-dlp -o - %s | mpv -"
   "Shell command for `embr-play-external'.
 %s is replaced with the current page URL (shell-quoted).
 Examples:
+  \"yt-dlp -o - %s | mpv -\"                — stream via yt-dlp into mpv (default)
   \"yt-dlp --cookies-from-browser firefox:~/.local/share/embr/firefox-profile -o - %s | mpv -\"
-    — stream via yt-dlp into mpv using embr's cookies (default)
+    — same but with embr's cookies (for age-restricted content)
   \"mpv %s\"       — open directly in mpv
   \"chromium %s\"  — open in Chromium"
   :type 'string)
