@@ -58,6 +58,11 @@ alongside the .el in the builds dir, so this just works.")
   "Target frames per second for the screenshot stream."
   :type 'integer)
 
+(defcustom better-eww-external-player "mpv"
+  "External media player for `better-eww-play-external'.
+The current URL is piped through yt-dlp and into this player."
+  :type 'string)
+
 (defcustom better-eww-search-engine 'brave
   "Search engine for URL bar queries.
 Can be a symbol (`brave', `google', `duckduckgo') or a custom URL
@@ -484,6 +489,21 @@ This does NOT remove the Emacs package itself — use your package manager for t
   (kill-new better-eww--current-url)
   (message "Copied: %s" better-eww--current-url))
 
+;; ── External player ───────────────────────────────────────────────
+
+(defun better-eww-play-external ()
+  "Play the current URL with yt-dlp piped to `better-eww-external-player'."
+  (interactive)
+  (let ((url better-eww--current-url))
+    (if (string-empty-p url)
+        (message "better-eww: no URL to play")
+      (message "Playing in %s: %s" better-eww-external-player url)
+      (start-process-shell-command
+       "better-eww-player" nil
+       (format "yt-dlp -o - %s | %s -"
+               (shell-quote-argument url)
+               better-eww-external-player)))))
+
 ;; ── Find in page ───────────────────────────────────────────────────
 
 (defvar better-eww--search-query "" "Current find-in-page query.")
@@ -701,6 +721,8 @@ This does NOT remove the Emacs package itself — use your package manager for t
     ;; All printable characters → forward to browser.
     (dolist (c (number-sequence 32 126))
       (define-key map (vector c) #'better-eww-self-insert))
+    ;; Override & for external player (like eww).
+    (define-key map (kbd "&") #'better-eww-play-external)
     ;; Special keys → forward to browser.
     (dolist (key '("<return>" "<backspace>" "<tab>" "<delete>"
                    "<home>" "<end>" "<up>" "<down>" "<left>" "<right>"

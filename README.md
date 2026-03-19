@@ -104,6 +104,7 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `better-eww-default-width` | `1280` | Viewport width in pixels |
 | `better-eww-default-height` | `720` | Viewport height in pixels |
 | `better-eww-search-engine` | `'brave` | `'brave`, `'google`, `'duckduckgo`, or a custom URL string with `%s` |
+| `better-eww-external-player` | `"mpv"` | Media player for `&` key (receives yt-dlp output via pipe) |
 
 ## Usage
 
@@ -133,6 +134,7 @@ All keys are forwarded directly to the browser. Typing, arrows, backspace, tab, 
 | `C-r` | Search backward (isearch-style) |
 | `C-v` | Page down |
 | `M-v` | Page up |
+| `&` | Play URL with yt-dlp + mpv (like eww's `&`) |
 | `C-x` | Emacs prefix (not forwarded) |
 | `M-x` | Emacs command (not forwarded) |
 | `C-c` | Browser command prefix (see below) |
