@@ -37,6 +37,10 @@ async def main():
     loop_task = None
     running = True
     target_fps = 60
+    # Cleared while a command handler runs, pausing the screenshot loop
+    # so CDP calls in the handler don't compete with screenshot traffic.
+    screenshots_ok = asyncio.Event()
+    screenshots_ok.set()
 
     user_data_dir = Path.home() / ".local" / "share" / "embr" / "firefox-profile"
     user_data_dir.mkdir(parents=True, exist_ok=True)
@@ -55,9 +59,12 @@ async def main():
         emit({"frame": True, "title": await page.title(), "url": page.url})
 
     async def screenshot_loop():
-        """Continuously capture frames at ~30 FPS."""
+        """Continuously capture frames at target FPS."""
         while running:
             if page is not None:
+                # Yield to command handlers — they clear this event so
+                # their CDP calls don't compete with screenshot traffic.
+                await screenshots_ok.wait()
                 start = asyncio.get_event_loop().time()
                 try:
                     await write_frame()
@@ -339,20 +346,31 @@ async def main():
         if last_mousemove is not None:
             commands.append(last_mousemove)
 
-        # Process the coalesced batch.  Wrap each handler call in a
-        # timeout so a single hung Playwright command can't permanently
-        # block the command loop (the live-debug showed page.goto/go_back
-        # can hang past their own timeouts, freezing all future commands).
+        # Process the coalesced batch.  Pause the screenshot loop so
+        # CDP calls in the handler don't compete with screenshot traffic
+        # (page.mouse.move() was hanging 35s+ under contention).
         should_exit = False
         for msg in commands:
             cmd = msg.get("cmd", "")
             params = {k: v for k, v in msg.items() if k != "cmd"}
-            try:
-                resp = await asyncio.wait_for(handle(cmd, params), timeout=35)
-            except asyncio.TimeoutError:
-                resp = {"error": f"command timed out: {cmd}"}
-            except Exception as e:
-                resp = {"error": str(e)}
+            # mousemove is fire-and-forget; no need to pause screenshots.
+            if cmd == "mousemove":
+                try:
+                    resp = await asyncio.wait_for(handle(cmd, params), timeout=35)
+                except asyncio.TimeoutError:
+                    resp = {"error": f"command timed out: {cmd}"}
+                except Exception as e:
+                    resp = {"error": str(e)}
+            else:
+                screenshots_ok.clear()
+                try:
+                    resp = await asyncio.wait_for(handle(cmd, params), timeout=35)
+                except asyncio.TimeoutError:
+                    resp = {"error": f"command timed out: {cmd}"}
+                except Exception as e:
+                    resp = {"error": str(e)}
+                finally:
+                    screenshots_ok.set()
             if resp is None:
                 should_exit = True
                 break
