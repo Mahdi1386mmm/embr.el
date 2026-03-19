@@ -746,7 +746,7 @@ This does NOT remove the Emacs package itself — use your package manager for t
       (define-key map (vector c) #'embr-self-insert))
     ;; Override & for external player (like eww).
     (define-key map (kbd "&") #'embr-play-external)
-    (define-key map (kbd "<f5>") #'embr-self-insert)
+    (define-key map (kbd "<f5>") #'embr-refresh)
     (define-key map (kbd "<f8>") #'embr-cycle-resolution)
     ;; Special keys → forward to browser.
     (dolist (key '("<return>" "<backspace>" "<tab>" "<delete>"
