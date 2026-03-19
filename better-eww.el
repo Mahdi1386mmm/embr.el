@@ -65,9 +65,9 @@ where .py, .venv, and setup.sh live.")
   (not (file-exists-p better-eww-python)))
 
 ;;;###autoload
-(defun better-eww-setup ()
-  "Run setup.sh to create the venv and install Playwright + Firefox.
-This only needs to be done once after installation or after updating."
+(defun better-eww-setup-or-update ()
+  "Run setup.sh to install or update the Python venv, Playwright, and Firefox.
+Safe to run at any time — rebuilds in a temp venv and swaps atomically."
   (interactive)
   (let ((setup-script (expand-file-name "setup.sh" better-eww--directory)))
     (unless (file-exists-p setup-script)
@@ -84,29 +84,10 @@ This only needs to be done once after installation or after updating."
            (when (string-match-p "finished" event)
              (with-current-buffer (get-buffer "*better-eww-setup*")
                (goto-char (point-max))
-               (insert "\nSetup complete. You can now run M-x better-eww-browse.\n")))))))))
+               (insert "\nDone. You can now run M-x better-eww-browse.\n")))))))))
 
-;;;###autoload
-(defun better-eww-update ()
-  "Update Playwright and re-download Firefox."
-  (interactive)
-  (let ((default-directory better-eww--directory))
-    (let ((buf (get-buffer-create "*better-eww-setup*")))
-      (with-current-buffer buf (erase-buffer))
-      (pop-to-buffer buf)
-      (insert "Updating Playwright and Firefox...\n\n")
-      (let ((proc (start-process "better-eww-update" buf
-                                  "bash" "-c"
-                                  (format "%s -m pip install --upgrade playwright && %s -m playwright install firefox"
-                                          (shell-quote-argument better-eww-python)
-                                          (shell-quote-argument better-eww-python)))))
-        (set-process-sentinel
-         proc
-         (lambda (_proc event)
-           (when (string-match-p "finished" event)
-             (with-current-buffer (get-buffer "*better-eww-setup*")
-               (goto-char (point-max))
-               (insert "\nUpdate complete.\n")))))))))
+(defalias 'better-eww-setup #'better-eww-setup-or-update)
+(defalias 'better-eww-update #'better-eww-setup-or-update)
 
 ;;;###autoload
 (defun better-eww-uninstall ()
@@ -656,9 +637,9 @@ If the daemon is already running, just navigate to the new URL."
   (when (better-eww--setup-needed-p)
     (if (y-or-n-p "better-eww: Python venv not found. Run setup now? ")
         (progn
-          (better-eww-setup)
+          (better-eww-setup-or-update)
           (error "better-eww: Setup started in *better-eww-setup* buffer. Run M-x better-eww-browse again when it finishes"))
-      (error "better-eww: Run M-x better-eww-setup first")))
+      (error "better-eww: Run M-x better-eww-setup-or-update first")))
   ;; Create buffer if needed.
   (unless (buffer-live-p better-eww--buffer)
     (setq better-eww--buffer (generate-new-buffer "*better-eww*"))

@@ -51,18 +51,21 @@ Then in your config:
 
 ## Setup
 
-After installing, run `M-x better-eww-setup` to create the Python venv and download Playwright's bundled Firefox (~100MB). This only needs to be done once.
+After installing, run `M-x better-eww-setup-or-update` to create the Python venv and download Playwright's bundled Firefox (~100MB).
 
 If you skip this step, `M-x better-eww-browse` will detect the missing venv and offer to run setup for you automatically.
 
 ### Management commands
 
+All management is done from Emacs — no terminal needed.
+
 | Command | Description |
 |---------|-------------|
-| `M-x better-eww-setup` | Install Python venv + Playwright + Firefox |
-| `M-x better-eww-update` | Update Playwright and re-download Firefox |
-| `M-x better-eww-uninstall` | Remove venv, browsers, and browser profile |
+| `M-x better-eww-setup-or-update` | Install or update venv + Playwright + Firefox (runs `setup.sh`) |
+| `M-x better-eww-uninstall` | Remove venv, browsers, and browser profile (runs `uninstall.sh`) |
 | `M-x better-eww-info` | Show diagnostic info about the installation |
+
+`better-eww-setup` and `better-eww-update` are aliases for `better-eww-setup-or-update`. The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's always safe to re-run — both for first install and for updates.
 
 ### Where state is stored
 
