@@ -210,6 +210,14 @@ Cloudflare Turnstile detects and blocks headless/automated browsers. The checkbo
 
 No. These services suck. We have no plans to play cat-and-mouse with their detection. Just don't use them.
 
+That said, embr does take basic measures to reduce fingerprinting and look like a normal Firefox session:
+
+- `navigator.webdriver` is removed (the main headless browser tell)
+- `navigator.plugins` and `navigator.mimeTypes` report a PDF Viewer (empty arrays are a common detection signal)
+- Screen size defaults to 1920x1080 independent of viewport (real browsers always have screen > viewport)
+- User-Agent is real Firefox (comes from Playwright's bundled Firefox)
+- Cookies and sessions persist across restarts (real browser profile)
+
 ### Fullscreen video
 
 YouTube fullscreen works thanks to `embr-fullscreen-hack` (enabled by default), which intercepts the Fullscreen API and fakes it with CSS fixed positioning. YouTube without being logged in can still be uncooperative — throttling, interruptions, etc.

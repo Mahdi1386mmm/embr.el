@@ -102,6 +102,27 @@ async def main():
             target_fps = params.get("fps", 30)
             fullscreen_hack = params.get("fullscreen_hack", False)
             page = context.pages[0] if context.pages else await context.new_page()
+            # Hide automation fingerprint.
+            sw = params.get("screen_width", 1920)
+            sh = params.get("screen_height", 1080)
+            await context.add_init_script(f"""
+                Object.defineProperty(navigator, 'webdriver', {{get: () => undefined}});
+                Object.defineProperty(screen, 'width', {{get: () => {sw}}});
+                Object.defineProperty(screen, 'height', {{get: () => {sh}}});
+                Object.defineProperty(screen, 'availWidth', {{get: () => {sw}}});
+                Object.defineProperty(screen, 'availHeight', {{get: () => {sh}}});
+                Object.defineProperty(navigator, 'plugins', {{get: () => {{
+                    const p = {{0: {{type: 'application/pdf'}}, length: 1}};
+                    p[0].name = 'PDF Viewer';
+                    p[0].description = 'Portable Document Format';
+                    p[0].filename = 'internal-pdf-viewer';
+                    return p;
+                }}}});
+                Object.defineProperty(navigator, 'mimeTypes', {{get: () => {{
+                    return {{0: {{type: 'application/pdf', suffixes: 'pdf',
+                        description: 'Portable Document Format'}}, length: 1}};
+                }}}});
+            """)
             if fullscreen_hack:
                 await context.add_init_script("""
                     (function() {
