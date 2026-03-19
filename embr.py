@@ -83,7 +83,8 @@ async def main():
                 headless=True,
                 enable_cache=True,
                 window=(width, height),
-                screen=Screen(max_width=sw, max_height=sh),
+                screen=Screen(min_width=sw, max_width=sw,
+                              min_height=sh, max_height=sh),
                 os="linux",
                 accept_downloads=False,
             )
