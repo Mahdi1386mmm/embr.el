@@ -89,17 +89,17 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 
 ## Configuration
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `embr-fps` | `60` | Target frames per second (try 30 if your machine struggles) |
-| `embr-default-width` | `1280` | Viewport width in pixels |
-| `embr-default-height` | `720` | Viewport height in pixels |
-| `embr-screen-width` | `1920` | Screen width reported to websites (should be >= viewport) |
-| `embr-screen-height` | `1080` | Screen height reported to websites (should be >= viewport) |
-| `embr-search-engine` | `'google` | `'google`, `'brave`, `'duckduckgo`, or custom URL with `%s` |
-| `embr-click-method` | `'atomic` | `'atomic` defers mousedown until drag detected, better iframe compat. `'immediate` sends mousedown instantly, for press-and-hold sites. |
-| `embr-scroll-method` | `'smooth` | `'smooth` scrolls 300px animated. `'instant` scrolls 100px, choppy line-by-line. |
-| `embr-external-command` | `"yt-dlp --cookies-from-browser firefox:~/.local/share/embr/firefox-profile -o - %s \| mpv -"` | Shell command for `&` key (`%s` = URL). Uses embr's cookies so logged-in sessions work. |
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `embr-fps` | integer | `60` | Target frames per second (try 30 if your machine struggles) |
+| `embr-default-width` | integer | `1280` | Viewport width in pixels |
+| `embr-default-height` | integer | `720` | Viewport height in pixels |
+| `embr-screen-width` | integer | `1920` | Screen width reported to websites (should be >= viewport) |
+| `embr-screen-height` | integer | `1080` | Screen height reported to websites (should be >= viewport) |
+| `embr-search-engine` | symbol/string | `'google` | `'google`, `'brave`, `'duckduckgo`, or custom URL with `%s` |
+| `embr-click-method` | symbol | `'atomic` | `'atomic` defers mousedown until drag detected, better iframe compat. `'immediate` sends mousedown instantly, for press-and-hold sites. |
+| `embr-scroll-method` | symbol | `'smooth` | `'smooth` scrolls 300px animated. `'instant` scrolls 100px, choppy line-by-line. |
+| `embr-external-command` | string | `"yt-dlp --cookies-from-browser firefox:~/.local/share/embr/firefox-profile -o - %s \| mpv -"` | Shell command for `&` key (`%s` = URL). Uses embr's cookies so logged-in sessions work. |
 
 
 ## Usage
