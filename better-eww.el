@@ -166,8 +166,8 @@ This does NOT remove the Emacs package itself — use your package manager for t
 (defvar better-eww--callback nil "Function to call with the next command response.")
 (defvar better-eww--current-url "" "The URL currently displayed.")
 (defvar better-eww--current-title "" "The title of the current page.")
-(defvar better-eww--viewport-width better-eww-default-width "Current viewport width.")
-(defvar better-eww--viewport-height better-eww-default-height "Current viewport height.")
+(defvar better-eww--viewport-width nil "Current viewport width.")
+(defvar better-eww--viewport-height nil "Current viewport height.")
 (defvar better-eww--frame-path nil "Path to the JPEG frame file written by the daemon.")
 (defvar better-eww--url-history nil "History of visited URLs for completion.")
 (defvar better-eww--hints nil "Current hint labels alist from the daemon.")
@@ -783,6 +783,8 @@ If the daemon is already running, just navigate to the new URL."
       (better-eww-mode)))
   ;; Start daemon if needed.
   (unless (and better-eww--process (process-live-p better-eww--process))
+    (setq better-eww--viewport-width (or better-eww--viewport-width better-eww-default-width)
+          better-eww--viewport-height (or better-eww--viewport-height better-eww-default-height))
     (better-eww--start-daemon)
     (let ((resp (better-eww--send-sync
                  `((cmd . "init")
