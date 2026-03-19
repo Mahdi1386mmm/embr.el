@@ -106,31 +106,40 @@ async def main():
                     (function() {
                         let fsEl = null;
                         const saved = new Map();
-                        Element.prototype.requestFullscreen = function() {
-                            fsEl = this;
-                            saved.set(this, this.getAttribute('style') || '');
-                            this.style.setProperty('position', 'fixed', 'important');
-                            this.style.setProperty('top', '0', 'important');
-                            this.style.setProperty('left', '0', 'important');
-                            this.style.setProperty('width', '100vw', 'important');
-                            this.style.setProperty('height', '100vh', 'important');
-                            this.style.setProperty('z-index', '2147483647', 'important');
-                            this.style.setProperty('background', '#000', 'important');
-                            const vid = this.querySelector('video');
+                        function enterFs(el) {
+                            fsEl = el;
+                            saved.set(el, el.getAttribute('style') || '');
+                            el.style.setProperty('position', 'fixed', 'important');
+                            el.style.setProperty('top', '0', 'important');
+                            el.style.setProperty('left', '0', 'important');
+                            el.style.setProperty('width', '100vw', 'important');
+                            el.style.setProperty('height', '100vh', 'important');
+                            el.style.setProperty('z-index', '2147483647', 'important');
+                            el.style.setProperty('background', '#000', 'important');
+                            const vid = el.querySelector('video');
                             if (vid) {
                                 saved.set(vid, vid.getAttribute('style') || '');
                                 vid.style.setProperty('width', '100%', 'important');
                                 vid.style.setProperty('height', '100%', 'important');
                                 vid.style.setProperty('object-fit', 'contain', 'important');
                             }
+                            const getFsEl = () => fsEl;
                             Object.defineProperty(document, 'fullscreenElement', {
-                                get: () => fsEl, configurable: true
+                                get: getFsEl, configurable: true
                             });
-                            this.dispatchEvent(new Event('fullscreenchange', {bubbles: true}));
+                            Object.defineProperty(document, 'mozFullScreenElement', {
+                                get: getFsEl, configurable: true
+                            });
+                            Object.defineProperty(document, 'webkitFullscreenElement', {
+                                get: getFsEl, configurable: true
+                            });
+                            el.dispatchEvent(new Event('fullscreenchange', {bubbles: true}));
                             document.dispatchEvent(new Event('fullscreenchange'));
+                            document.dispatchEvent(new Event('mozfullscreenchange'));
+                            document.dispatchEvent(new Event('webkitfullscreenchange'));
                             return Promise.resolve();
-                        };
-                        document.exitFullscreen = function() {
+                        }
+                        function exitFs() {
                             if (fsEl) {
                                 const origStyle = saved.get(fsEl);
                                 if (origStyle !== undefined) fsEl.setAttribute('style', origStyle);
@@ -142,13 +151,42 @@ async def main():
                                     else vid.removeAttribute('style');
                                 }
                                 fsEl = null;
+                                const getNull = () => null;
                                 Object.defineProperty(document, 'fullscreenElement', {
-                                    get: () => null, configurable: true
+                                    get: getNull, configurable: true
+                                });
+                                Object.defineProperty(document, 'mozFullScreenElement', {
+                                    get: getNull, configurable: true
+                                });
+                                Object.defineProperty(document, 'webkitFullscreenElement', {
+                                    get: getNull, configurable: true
                                 });
                                 document.dispatchEvent(new Event('fullscreenchange'));
+                                document.dispatchEvent(new Event('mozfullscreenchange'));
+                                document.dispatchEvent(new Event('webkitfullscreenchange'));
                             }
                             return Promise.resolve();
-                        };
+                        }
+                        // Standard
+                        Element.prototype.requestFullscreen = function() { return enterFs(this); };
+                        document.exitFullscreen = exitFs;
+                        // Mozilla
+                        Element.prototype.mozRequestFullScreen = function() { return enterFs(this); };
+                        document.mozCancelFullScreen = exitFs;
+                        // WebKit
+                        Element.prototype.webkitRequestFullscreen = function() { return enterFs(this); };
+                        Element.prototype.webkitRequestFullScreen = function() { return enterFs(this); };
+                        document.webkitExitFullscreen = exitFs;
+                        // Fullscreen enabled
+                        Object.defineProperty(document, 'fullscreenEnabled', {
+                            get: () => true, configurable: true
+                        });
+                        Object.defineProperty(document, 'mozFullScreenEnabled', {
+                            get: () => true, configurable: true
+                        });
+                        Object.defineProperty(document, 'webkitFullscreenEnabled', {
+                            get: () => true, configurable: true
+                        });
                     })();
                 """)
             loop_task = asyncio.create_task(screenshot_loop())
