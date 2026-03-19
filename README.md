@@ -202,7 +202,7 @@ Cloudflare Turnstile detects and blocks headless/automated browsers. The checkbo
 
 ### Will you try to bypass Google/Cloudflare detection?
 
-No. Services that block headless browsers suck. We have no plans to play cat-and-mouse with their detection. Just don't use them. There are better alternatives that don't treat their users like bots.
+No. These services suck. We have no plans to play cat-and-mouse with their detection. Just don't use them.
 
 ### Fullscreen video
 
