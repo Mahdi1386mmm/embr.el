@@ -127,6 +127,8 @@ All keys are forwarded directly to the browser. Typing, arrows, backspace, tab, 
 | `C-d` | Delete forward |
 | `M-f` | Word forward |
 | `M-b` | Word backward |
+| `M-w` | Copy browser selection to kill ring (system clipboard) |
+| `C-y` | Paste from kill ring into browser |
 | `C-s` | Search forward (isearch-style) |
 | `C-r` | Search backward (isearch-style) |
 | `C-v` | Page down |
@@ -157,6 +159,8 @@ Browser commands use the `C-c` prefix.
 | `C-c ]` / `C-c [` | Next / previous tab |
 | `C-c a` | List all tabs |
 | Mouse click | Click at coordinates |
+| Click and drag | Select text |
+| Double-click | Select word |
 | Scroll wheel | Scroll page |
 
 ### Bookmarks
