@@ -10,6 +10,14 @@ Emacs is the display server. Headless Firefox is the renderer.
 
 ## Installation
 
+<table>
+<tr>
+<td> <b>Elpaca</b> </td>
+<td> <b>straight.el</b> </td>
+</tr>
+<tr>
+<td>
+
 ```elisp
 (use-package embr
   :defer t
@@ -22,6 +30,26 @@ Emacs is the display server. Headless Firefox is the renderer.
         embr-default-height 720
         embr-search-engine 'brave))
 ```
+
+</td>
+<td>
+
+```elisp
+(use-package embr
+  :defer t
+  :straight (:host github
+             :repo "emacs-os/embr.el"
+             :files ("*.el" "*.py" "*.sh"))
+  :config
+  (setq embr-fps 30
+        embr-default-width 1280
+        embr-default-height 720
+        embr-search-engine 'brave))
+```
+
+</td>
+</tr>
+</table>
 
 ## Setup
 
