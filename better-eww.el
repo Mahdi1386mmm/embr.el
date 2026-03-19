@@ -26,8 +26,15 @@
   :prefix "better-eww-")
 
 (defvar better-eww--directory
-  (file-name-directory (file-truename (or load-file-name buffer-file-name)))
-  "Directory where better-eww source lives (resolved through symlinks).")
+  (file-name-directory
+   (file-truename
+    (or (locate-library "better-eww.el" t)
+        load-file-name
+        buffer-file-name)))
+  "Directory where better-eww source lives (resolved through symlinks).
+Elpaca/straight symlink the .el into a builds dir; `locate-library'
+finds that symlink and `file-truename' resolves it back to the repo
+where .py, .venv, and setup.sh live.")
 
 (defcustom better-eww-python
   (expand-file-name ".venv/bin/python" better-eww--directory)
@@ -50,6 +57,66 @@
 (defcustom better-eww-fps 30
   "Target frames per second for the screenshot stream."
   :type 'integer)
+
+;; ── Setup & management ─────────────────────────────────────────────
+
+(defun better-eww--setup-needed-p ()
+  "Return non-nil if setup.sh needs to be run."
+  (not (file-exists-p better-eww-python)))
+
+;;;###autoload
+(defun better-eww-setup ()
+  "Run setup.sh to create the venv and install Playwright + Firefox.
+This only needs to be done once after installation or after updating."
+  (interactive)
+  (let ((setup-script (expand-file-name "setup.sh" better-eww--directory)))
+    (unless (file-exists-p setup-script)
+      (error "better-eww: setup.sh not found in %s" better-eww--directory))
+    (let ((buf (get-buffer-create "*better-eww-setup*")))
+      (with-current-buffer buf (erase-buffer))
+      (pop-to-buffer buf)
+      (insert (format "Running setup.sh in %s ...\n\n" better-eww--directory))
+      (let ((proc (start-process "better-eww-setup" buf
+                                  "bash" setup-script)))
+        (set-process-sentinel
+         proc
+         (lambda (_proc event)
+           (when (string-match-p "finished" event)
+             (with-current-buffer (get-buffer "*better-eww-setup*")
+               (goto-char (point-max))
+               (insert "\nSetup complete. You can now run M-x better-eww-browse.\n")))))))))
+
+;;;###autoload
+(defun better-eww-update ()
+  "Update Playwright and re-download Firefox."
+  (interactive)
+  (let ((default-directory better-eww--directory))
+    (let ((buf (get-buffer-create "*better-eww-setup*")))
+      (with-current-buffer buf (erase-buffer))
+      (pop-to-buffer buf)
+      (insert "Updating Playwright and Firefox...\n\n")
+      (let ((proc (start-process "better-eww-update" buf
+                                  "bash" "-c"
+                                  (format "%s -m pip install --upgrade playwright && %s -m playwright install firefox"
+                                          (shell-quote-argument better-eww-python)
+                                          (shell-quote-argument better-eww-python)))))
+        (set-process-sentinel
+         proc
+         (lambda (_proc event)
+           (when (string-match-p "finished" event)
+             (with-current-buffer (get-buffer "*better-eww-setup*")
+               (goto-char (point-max))
+               (insert "\nUpdate complete.\n")))))))))
+
+;;;###autoload
+(defun better-eww-info ()
+  "Show diagnostic info about the better-eww installation."
+  (interactive)
+  (message "better-eww directory: %s\nPython: %s (exists: %s)\nScript: %s (exists: %s)\nSetup needed: %s"
+           better-eww--directory
+           better-eww-python (file-exists-p better-eww-python)
+           better-eww-script (file-exists-p better-eww-script)
+           (better-eww--setup-needed-p)))
 
 ;; ── Internal state ─────────────────────────────────────────────────
 
@@ -542,6 +609,13 @@
   "Launch better-eww and navigate to URL.
 If the daemon is already running, just navigate to the new URL."
   (interactive "sURL: ")
+  ;; Check if setup has been run.
+  (when (better-eww--setup-needed-p)
+    (if (y-or-n-p "better-eww: Python venv not found. Run setup now? ")
+        (progn
+          (better-eww-setup)
+          (error "better-eww: Setup started in *better-eww-setup* buffer. Run M-x better-eww-browse again when it finishes"))
+      (error "better-eww: Run M-x better-eww-setup first")))
   ;; Create buffer if needed.
   (unless (buffer-live-p better-eww--buffer)
     (setq better-eww--buffer (generate-new-buffer "*better-eww*"))

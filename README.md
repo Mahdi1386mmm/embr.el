@@ -51,12 +51,17 @@ Then in your config:
 
 ## Setup
 
-After installing, run the setup script once to create the Python venv and download Playwright's bundled Firefox (~100MB):
+After installing, run `M-x better-eww-setup` to create the Python venv and download Playwright's bundled Firefox (~100MB). This only needs to be done once.
 
-```bash
-cd /path/to/better-eww
-bash setup.sh
-```
+If you skip this step, `M-x better-eww-browse` will detect the missing venv and offer to run setup for you automatically.
+
+### Management commands
+
+| Command | Description |
+|---------|-------------|
+| `M-x better-eww-setup` | Install Python venv + Playwright + Firefox |
+| `M-x better-eww-update` | Update Playwright and re-download Firefox |
+| `M-x better-eww-info` | Show diagnostic info about the installation |
 
 ## Usage
 
