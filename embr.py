@@ -37,6 +37,8 @@ async def main():
     loop_task = None
     running = True
     target_fps = 60
+    screenshots_ok = asyncio.Event()
+    screenshots_ok.set()
 
     user_data_dir = Path.home() / ".local" / "share" / "embr" / "firefox-profile"
     user_data_dir.mkdir(parents=True, exist_ok=True)
@@ -58,6 +60,7 @@ async def main():
         """Continuously capture frames at target FPS."""
         while running:
             if page is not None:
+                await screenshots_ok.wait()
                 start = asyncio.get_event_loop().time()
                 try:
                     await write_frame()
@@ -67,6 +70,70 @@ async def main():
                 await asyncio.sleep(max(0, (1 / target_fps) - elapsed))
             else:
                 await asyncio.sleep(0.05)
+
+    # ── Mouse worker: serializes mouse CDP calls so concurrent
+    # fire-and-forget tasks don't race on Playwright's shared mouse state.
+    mouse_queue = asyncio.Queue()
+
+    async def mouse_worker():
+        while running:
+            item = await mouse_queue.get()
+            # Drain any additional queued commands; coalesce mousemoves.
+            items = [item]
+            while not mouse_queue.empty():
+                items.append(mouse_queue.get_nowait())
+            commands = []
+            last_move = None
+            for c, p in items:
+                if c == "mousemove":
+                    last_move = (c, p)
+                else:
+                    if last_move:
+                        commands.append(last_move)
+                        last_move = None
+                    commands.append((c, p))
+            if last_move:
+                commands.append(last_move)
+            for c, p in commands:
+                try:
+                    await _do_mouse(c, p)
+                except Exception:
+                    pass
+
+    async def _do_mouse(c, p):
+        x, y = p.get("x", 0), p.get("y", 0)
+        if c in ("click", "mousedown", "mouseup"):
+            # Briefly pause screenshots so the CDP Input call gets
+            # exclusive bandwidth.  Without this, screenshot traffic
+            # (~32 CDP calls/sec) starves Input.dispatch* indefinitely.
+            screenshots_ok.clear()
+            try:
+                if c == "click":
+                    await asyncio.wait_for(page.mouse.click(x, y), timeout=0.5)
+                elif c == "mousedown":
+                    await asyncio.wait_for(page.mouse.move(x, y), timeout=0.25)
+                    await asyncio.wait_for(page.mouse.down(), timeout=0.25)
+                elif c == "mouseup":
+                    await asyncio.wait_for(page.mouse.move(x, y), timeout=0.25)
+                    await asyncio.wait_for(page.mouse.up(), timeout=0.25)
+            except asyncio.TimeoutError:
+                # Still timed out even with exclusive bandwidth — reset.
+                try:
+                    await asyncio.wait_for(page.mouse.up(), timeout=0.25)
+                except Exception:
+                    pass
+            finally:
+                screenshots_ok.set()
+        elif c == "mousemove":
+            # Mousemove via evaluate — no isTrusted needed, avoids
+            # flooding the CDP Input pipeline from 15Hz hover timer.
+            await page.evaluate("""([x, y]) => {
+                const el = document.elementFromPoint(x, y);
+                if (el) el.dispatchEvent(new MouseEvent('mousemove', {
+                    bubbles: true, cancelable: true, view: window,
+                    clientX: x, clientY: y
+                }));
+            }""", [x, y])
 
     async def handle(cmd, params):
         nonlocal context, page, running, loop_task, target_fps
@@ -111,6 +178,7 @@ async def main():
             # Force our exact viewport size (camoufox may derive a different one from its fingerprint).
             await page.set_viewport_size({"width": width, "height": height})
             loop_task = asyncio.create_task(screenshot_loop())
+            asyncio.create_task(mouse_worker())
             return {"ok": True, "frame_path": FRAME_PATH}
 
         if context is None or page is None:
@@ -126,42 +194,31 @@ async def main():
                 pass  # Timeout or nav error — page state visible via screenshots.
             return {"ok": True}
 
-        # All mouse commands are fire-and-forget: the Emacs side doesn't
-        # depend on responses for flow control, and any of these CDP calls
-        # can hang 35s+ under heavy screenshot throughput.
+        # Mouse commands go through a serialized worker queue so they
+        # don't race on Playwright's shared mouse state, but also don't
+        # block the command loop.
         if cmd in ("click", "mousedown", "mouseup", "mousemove"):
-            async def _mouse(c, p):
+            await mouse_queue.put((cmd, params))
+            return {"ok": True}
+
+        # Keyboard and scroll are also fire-and-forget: these are
+        # high-frequency input commands that must never block the
+        # command loop under CDP contention.
+        if cmd in ("type", "key", "scroll"):
+            async def _input(c, p):
                 try:
-                    if c == "click":
-                        await page.mouse.click(p["x"], p["y"])
-                    elif c == "mousedown":
-                        await page.mouse.move(p["x"], p["y"])
-                        await page.mouse.down()
-                    elif c == "mouseup":
-                        await page.mouse.move(p["x"], p["y"])
-                        await page.mouse.up()
-                    elif c == "mousemove":
-                        await page.mouse.move(p["x"], p["y"])
+                    if c == "type":
+                        await page.keyboard.type(p["text"])
+                    elif c == "key":
+                        await page.keyboard.press(p["key"])
+                    elif c == "scroll":
+                        await page.evaluate(
+                            "window.scrollBy({{left: {}, top: {}, behavior: '{}'}})".format(
+                                p.get("delta_x", 0), p.get("delta_y", 0),
+                                p.get("behavior", "instant")))
                 except Exception:
                     pass
-            asyncio.create_task(_mouse(cmd, params))
-            return {"ok": True}
-
-        if cmd == "type":
-            await page.keyboard.type(params["text"])
-            return {"ok": True}
-
-        if cmd == "key":
-            await page.keyboard.press(params["key"])
-            return {"ok": True}
-
-        if cmd == "scroll":
-            delta_x = params.get("delta_x", 0)
-            delta_y = params.get("delta_y", 0)
-            behavior = params.get("behavior", "instant")
-            await page.evaluate(
-                f"window.scrollBy({{left: {delta_x}, top: {delta_y}, behavior: '{behavior}'}})"
-            )
+            asyncio.create_task(_input(cmd, params))
             return {"ok": True}
 
         if cmd == "back":
