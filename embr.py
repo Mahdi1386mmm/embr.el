@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""better-eww daemon: headless Firefox controlled via JSON over stdin/stdout."""
+"""embr daemon: headless Firefox controlled via JSON over stdin/stdout."""
 
 import asyncio
 import json
@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
-FRAME_PATH = os.path.join(tempfile.gettempdir(), "better-eww-frame.jpg")
+FRAME_PATH = os.path.join(tempfile.gettempdir(), "embr-frame.jpg")
 SCRIPT_DIR = Path(__file__).resolve().parent
 BLOCKLIST_PATH = SCRIPT_DIR / "blocklist.txt"
 
@@ -37,7 +37,7 @@ async def main():
     running = True
     target_fps = 30
 
-    user_data_dir = Path.home() / ".local" / "share" / "better-eww" / "firefox-profile"
+    user_data_dir = Path.home() / ".local" / "share" / "embr" / "firefox-profile"
     user_data_dir.mkdir(parents=True, exist_ok=True)
 
     def emit(obj):
@@ -178,7 +178,7 @@ async def main():
             # Inject hint labels onto all clickable elements, return their info.
             hints = await page.evaluate("""() => {
                 // Remove old hints if any.
-                document.querySelectorAll('.better-eww-hint').forEach(e => e.remove());
+                document.querySelectorAll('.embr-hint').forEach(e => e.remove());
                 const sel = 'a, button, input, select, textarea, [onclick], [role="button"], [role="link"], [tabindex]';
                 const els = Array.from(document.querySelectorAll(sel)).filter(el => {
                     const r = el.getBoundingClientRect();
@@ -199,7 +199,7 @@ async def main():
                     const r = el.getBoundingClientRect();
                     const tag = label(i);
                     const hint = document.createElement('div');
-                    hint.className = 'better-eww-hint';
+                    hint.className = 'embr-hint';
                     hint.textContent = tag;
                     hint.style.cssText = 'position:fixed;z-index:2147483647;background:#ffee00;color:#000;font:bold 12px monospace;padding:1px 3px;border:1px solid #000;border-radius:2px;pointer-events:none;';
                     hint.style.left = r.left + 'px';
@@ -212,7 +212,7 @@ async def main():
             return {"ok": True, "hints": hints}
 
         if cmd == "hints-clear":
-            await page.evaluate("() => document.querySelectorAll('.better-eww-hint').forEach(e => e.remove())")
+            await page.evaluate("() => document.querySelectorAll('.embr-hint').forEach(e => e.remove())")
             return {"ok": True}
 
         if cmd == "text":

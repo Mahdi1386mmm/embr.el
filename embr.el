@@ -1,14 +1,14 @@
-;;; better-eww.el --- Browse the web with headless Firefox in Emacs -*- lexical-binding: t; -*-
+;;; embr.el --- Browse the web with headless Firefox in Emacs -*- lexical-binding: t; -*-
 
-;; Author: better-eww contributors
+;; Author: embr contributors
 ;; Version: 0.2.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: web, browser
-;; URL: https://github.com/user/better-eww
+;; URL: https://github.com/user/embr
 
 ;;; Commentary:
 
-;; better-eww runs a headless Firefox (via Playwright) and displays
+;; embr runs a headless Firefox (via Playwright) and displays
 ;; screenshots in an Emacs buffer.  Clicks, keystrokes, and scroll
 ;; events are forwarded to the browser.  The daemon streams frames
 ;; at ~30 FPS via JPEG files on disk.
@@ -20,50 +20,50 @@
 
 ;; ── Customization ──────────────────────────────────────────────────
 
-(defgroup better-eww nil
+(defgroup embr nil
   "Headless Firefox browser for Emacs."
   :group 'web
-  :prefix "better-eww-")
+  :prefix "embr-")
 
-(defvar better-eww--directory
+(defvar embr--directory
   (file-name-directory (or load-file-name buffer-file-name))
-  "Directory where better-eww package files live.
+  "Directory where embr package files live.
 With :files in the package recipe, Elpaca/straight symlink .py and .sh
 alongside the .el in the builds dir, so this just works.")
 
-(defvar better-eww--data-dir
-  (expand-file-name "better-eww" (or (getenv "XDG_DATA_HOME")
+(defvar embr--data-dir
+  (expand-file-name "embr" (or (getenv "XDG_DATA_HOME")
                                       (expand-file-name ".local/share" "~")))
-  "Directory for persistent better-eww data (~/.local/share/better-eww/).")
+  "Directory for persistent embr data (~/.local/share/embr/).")
 
-(defcustom better-eww-python
-  (expand-file-name ".venv/bin/python" better-eww--data-dir)
+(defcustom embr-python
+  (expand-file-name ".venv/bin/python" embr--data-dir)
   "Path to the Python interpreter inside the project venv."
   :type 'file)
 
-(defcustom better-eww-script
-  (expand-file-name "better-eww.py" better-eww--directory)
-  "Path to the better-eww Python daemon script."
+(defcustom embr-script
+  (expand-file-name "embr.py" embr--directory)
+  "Path to the embr Python daemon script."
   :type 'file)
 
-(defcustom better-eww-default-width 1280
+(defcustom embr-default-width 1280
   "Default viewport width in pixels."
   :type 'integer)
 
-(defcustom better-eww-default-height 720
+(defcustom embr-default-height 720
   "Default viewport height in pixels."
   :type 'integer)
 
-(defcustom better-eww-fps 30
+(defcustom embr-fps 30
   "Target frames per second for the screenshot stream."
   :type 'integer)
 
-(defcustom better-eww-external-player "mpv"
-  "External media player for `better-eww-play-external'.
+(defcustom embr-external-player "mpv"
+  "External media player for `embr-play-external'.
 The current URL is piped through yt-dlp and into this player."
   :type 'string)
 
-(defcustom better-eww-search-engine 'brave
+(defcustom embr-search-engine 'brave
   "Search engine for URL bar queries.
 Can be a symbol (`brave', `google', `duckduckgo') or a custom URL
 string with %s for the query."
@@ -72,61 +72,61 @@ string with %s for the query."
                  (const :tag "DuckDuckGo" duckduckgo)
                  (string :tag "Custom URL (use %s for query)")))
 
-(defun better-eww--search-url (query)
-  "Build a search URL for QUERY using `better-eww-search-engine'."
-  (let ((template (pcase better-eww-search-engine
+(defun embr--search-url (query)
+  "Build a search URL for QUERY using `embr-search-engine'."
+  (let ((template (pcase embr-search-engine
                     ('brave "https://search.brave.com/search?q=%s")
                     ('google "https://www.google.com/search?q=%s")
                     ('duckduckgo "https://duckduckgo.com/?q=%s")
-                    ((pred stringp) better-eww-search-engine))))
+                    ((pred stringp) embr-search-engine))))
     (format template (url-hexify-string query))))
 
 ;; ── Setup & management ─────────────────────────────────────────────
 
-(defun better-eww--setup-needed-p ()
+(defun embr--setup-needed-p ()
   "Return non-nil if setup.sh needs to be run."
-  (not (file-exists-p better-eww-python)))
+  (not (file-exists-p embr-python)))
 
 ;;;###autoload
-(defun better-eww-setup-or-update ()
+(defun embr-setup-or-update ()
   "Run setup.sh to install or update the Python venv, Playwright, Firefox, and ad blocklist.
 Safe to run at any time — rebuilds in a temp venv and swaps atomically."
   (interactive)
-  (let ((setup-script (expand-file-name "setup.sh" better-eww--directory)))
+  (let ((setup-script (expand-file-name "setup.sh" embr--directory)))
     (unless (file-exists-p setup-script)
-      (error "better-eww: setup.sh not found in %s" better-eww--directory))
-    (let ((buf (get-buffer-create "*better-eww-setup*")))
+      (error "embr: setup.sh not found in %s" embr--directory))
+    (let ((buf (get-buffer-create "*embr-setup*")))
       (with-current-buffer buf (erase-buffer))
       (pop-to-buffer buf)
-      (insert (format "Running setup.sh in %s ...\n\n" better-eww--directory))
-      (let ((proc (start-process "better-eww-setup" buf
+      (insert (format "Running setup.sh in %s ...\n\n" embr--directory))
+      (let ((proc (start-process "embr-setup" buf
                                   "bash" setup-script)))
         (set-process-sentinel
          proc
          (lambda (_proc event)
            (when (string-match-p "finished" event)
-             (with-current-buffer (get-buffer "*better-eww-setup*")
+             (with-current-buffer (get-buffer "*embr-setup*")
                (goto-char (point-max))
-               (insert "\nDone. You can now run M-x better-eww-browse.\n")))))))))
+               (insert "\nDone. You can now run M-x embr-browse.\n")))))))))
 
 
 ;;;###autoload
-(defun better-eww-uninstall ()
+(defun embr-uninstall ()
   "Remove the Python venv, Playwright browsers, and browser profile.
 This does NOT remove the Emacs package itself — use your package manager for that."
   (interactive)
-  (let ((script (expand-file-name "uninstall.sh" better-eww--directory)))
+  (let ((script (expand-file-name "uninstall.sh" embr--directory)))
     (unless (file-exists-p script)
-      (error "better-eww: uninstall.sh not found in %s" better-eww--directory))
-    (let ((buf (get-buffer-create "*better-eww-setup*")))
+      (error "embr: uninstall.sh not found in %s" embr--directory))
+    (let ((buf (get-buffer-create "*embr-setup*")))
       (with-current-buffer buf (erase-buffer))
       (pop-to-buffer buf)
-      (insert (format "Running uninstall.sh in %s ...\n\n" better-eww--directory))
+      (insert (format "Running uninstall.sh in %s ...\n\n" embr--directory))
       ;; Run with yes piped to stdin to auto-confirm (user already confirmed via M-x).
       (when (y-or-n-p "Remove Python venv and browser profile? ")
         (let* ((also-browsers (y-or-n-p "Also delete Playwright's shared browser cache (~/.cache/ms-playwright)? "))
                (input (concat "y\n" (if also-browsers "y\n" "n\n")))
-               (proc (start-process "better-eww-uninstall" buf "bash" "-c"
+               (proc (start-process "embr-uninstall" buf "bash" "-c"
                                      (format "echo %s | bash %s"
                                              (shell-quote-argument input)
                                              (shell-quote-argument script)))))
@@ -134,20 +134,20 @@ This does NOT remove the Emacs package itself — use your package manager for t
            proc
            (lambda (_proc event)
              (when (string-match-p "finished" event)
-               (with-current-buffer (get-buffer "*better-eww-setup*")
+               (with-current-buffer (get-buffer "*embr-setup*")
                  (goto-char (point-max))
                  (insert "\nDone.\n"))))))))))
 
 ;;;###autoload
-(defun better-eww-info ()
-  "Show diagnostic info about the better-eww installation."
+(defun embr-info ()
+  "Show diagnostic info about the embr installation."
   (interactive)
-  (let ((venv-dir (expand-file-name ".venv" better-eww--data-dir))
+  (let ((venv-dir (expand-file-name ".venv" embr--data-dir))
         (browsers-dir (expand-file-name "ms-playwright" (or (getenv "XDG_CACHE_HOME")
                                                             (expand-file-name ".cache" "~"))))
-        (profile-dir (expand-file-name "better-eww" (or (getenv "XDG_DATA_HOME")
+        (profile-dir (expand-file-name "embr" (or (getenv "XDG_DATA_HOME")
                                                          (expand-file-name ".local/share" "~")))))
-    (message "better-eww installation:
+    (message "embr installation:
   Source:     %s
   Python:     %s (%s)
   Script:     %s (%s)
@@ -155,56 +155,56 @@ This does NOT remove the Emacs package itself — use your package manager for t
   Browsers:   %s (%s)
   Profile:    %s (%s)
   Setup needed: %s"
-             better-eww--directory
-             better-eww-python (if (file-exists-p better-eww-python) "OK" "MISSING")
-             better-eww-script (if (file-exists-p better-eww-script) "OK" "MISSING")
+             embr--directory
+             embr-python (if (file-exists-p embr-python) "OK" "MISSING")
+             embr-script (if (file-exists-p embr-script) "OK" "MISSING")
              venv-dir (if (file-directory-p venv-dir) "OK" "MISSING")
              browsers-dir (if (file-directory-p browsers-dir) "OK" "MISSING")
              profile-dir (if (file-directory-p profile-dir) "exists" "not yet created")
-             (better-eww--setup-needed-p))))
+             (embr--setup-needed-p))))
 
 ;; ── Internal state ─────────────────────────────────────────────────
 
-(defvar better-eww--process nil "The daemon subprocess.")
-(defvar better-eww--buffer nil "The display buffer.")
-(defvar better-eww--response-buffer "" "Accumulator for partial JSON lines from the process.")
-(defvar better-eww--callback nil "Function to call with the next command response.")
-(defvar better-eww--current-url "" "The URL currently displayed.")
-(defvar better-eww--current-title "" "The title of the current page.")
-(defvar better-eww--viewport-width nil "Current viewport width.")
-(defvar better-eww--viewport-height nil "Current viewport height.")
-(defvar better-eww--frame-path nil "Path to the JPEG frame file written by the daemon.")
-(defvar better-eww--url-history nil "History of visited URLs for completion.")
-(defvar better-eww--hints nil "Current hint labels alist from the daemon.")
+(defvar embr--process nil "The daemon subprocess.")
+(defvar embr--buffer nil "The display buffer.")
+(defvar embr--response-buffer "" "Accumulator for partial JSON lines from the process.")
+(defvar embr--callback nil "Function to call with the next command response.")
+(defvar embr--current-url "" "The URL currently displayed.")
+(defvar embr--current-title "" "The title of the current page.")
+(defvar embr--viewport-width nil "Current viewport width.")
+(defvar embr--viewport-height nil "Current viewport height.")
+(defvar embr--frame-path nil "Path to the JPEG frame file written by the daemon.")
+(defvar embr--url-history nil "History of visited URLs for completion.")
+(defvar embr--hints nil "Current hint labels alist from the daemon.")
 
 ;; ── Process management ─────────────────────────────────────────────
 
-(defun better-eww--start-daemon ()
+(defun embr--start-daemon ()
   "Start the Python daemon process."
-  (when (and better-eww--process (process-live-p better-eww--process))
-    (delete-process better-eww--process))
-  (setq better-eww--response-buffer "")
+  (when (and embr--process (process-live-p embr--process))
+    (delete-process embr--process))
+  (setq embr--response-buffer "")
   (let ((process-environment (cons "PLAYWRIGHT_BROWSERS_PATH=" process-environment)))
-    (setq better-eww--process
+    (setq embr--process
           (make-process
-           :name "better-eww"
-           :command (list better-eww-python better-eww-script)
+           :name "embr"
+           :command (list embr-python embr-script)
            :connection-type 'pipe
            :noquery t
-           :filter #'better-eww--process-filter
-           :sentinel #'better-eww--process-sentinel))))
+           :filter #'embr--process-filter
+           :sentinel #'embr--process-sentinel))))
 
-(defun better-eww--process-filter (_proc output)
+(defun embr--process-filter (_proc output)
   "Handle OUTPUT from the daemon process."
-  (setq better-eww--response-buffer
-        (concat better-eww--response-buffer output))
+  (setq embr--response-buffer
+        (concat embr--response-buffer output))
   ;; Process all complete lines.  For frame notifications, only render
   ;; the latest one (skip intermediate frames if Emacs can't keep up).
   (let (last-frame)
-    (while (string-match "\n" better-eww--response-buffer)
+    (while (string-match "\n" embr--response-buffer)
       (let* ((pos (match-end 0))
-             (line (substring better-eww--response-buffer 0 (1- pos))))
-        (setq better-eww--response-buffer (substring better-eww--response-buffer pos))
+             (line (substring embr--response-buffer 0 (1- pos))))
+        (setq embr--response-buffer (substring embr--response-buffer pos))
         (when (and line (not (string-empty-p line)))
           (condition-case err
               (let ((json-object-type 'alist)
@@ -215,56 +215,56 @@ This does NOT remove the Emacs package itself — use your package manager for t
                       ;; Frame notification — just remember the latest one.
                       (setq last-frame resp)
                     ;; Command response — dispatch to callback.
-                    (when better-eww--callback
-                      (let ((cb better-eww--callback))
-                        (setq better-eww--callback nil)
+                    (when embr--callback
+                      (let ((cb embr--callback))
+                        (setq embr--callback nil)
                         (funcall cb resp))))))
-            (error (message "better-eww: JSON parse error: %s"
+            (error (message "embr: JSON parse error: %s"
                             (error-message-string err)))))))
     ;; Render only the most recent frame.
     (when last-frame
-      (better-eww--handle-frame last-frame))))
+      (embr--handle-frame last-frame))))
 
-(defun better-eww--process-sentinel (_proc event)
+(defun embr--process-sentinel (_proc event)
   "Handle process EVENT (e.g. exit)."
   (when (string-match-p "\\(finished\\|exited\\|killed\\)" event)
-    (message "better-eww: daemon exited: %s" (string-trim event))
-    (setq better-eww--process nil)))
+    (message "embr: daemon exited: %s" (string-trim event))
+    (setq embr--process nil)))
 
-(defun better-eww--send (msg &optional callback)
+(defun embr--send (msg &optional callback)
   "Send MSG (an alist) to the daemon as JSON.  Call CALLBACK with the response."
-  (unless (and better-eww--process (process-live-p better-eww--process))
-    (error "better-eww: daemon not running"))
-  (setq better-eww--callback callback)
+  (unless (and embr--process (process-live-p embr--process))
+    (error "embr: daemon not running"))
+  (setq embr--callback callback)
   (let ((json-str (json-encode msg)))
-    (process-send-string better-eww--process (concat json-str "\n"))))
+    (process-send-string embr--process (concat json-str "\n"))))
 
-(defun better-eww--send-sync (msg)
+(defun embr--send-sync (msg)
   "Send MSG and wait synchronously for the response.  Returns the parsed alist."
   (let ((result nil)
         (done nil))
-    (better-eww--send msg (lambda (resp)
+    (embr--send msg (lambda (resp)
                             (setq result resp done t)))
     (while (not done)
-      (accept-process-output better-eww--process 30))
+      (accept-process-output embr--process 30))
     result))
 
 ;; ── Display ────────────────────────────────────────────────────────
 
-(defun better-eww--handle-frame (resp)
+(defun embr--handle-frame (resp)
   "Read the JPEG frame from disk and display it.  Update title/url from RESP."
   (let ((title (or (alist-get 'title resp) ""))
         (url (or (alist-get 'url resp) "")))
-    (setq better-eww--current-title title
-          better-eww--current-url url)
-    (when (and better-eww--frame-path
-               (file-exists-p better-eww--frame-path)
-               (buffer-live-p better-eww--buffer))
+    (setq embr--current-title title
+          embr--current-url url)
+    (when (and embr--frame-path
+               (file-exists-p embr--frame-path)
+               (buffer-live-p embr--buffer))
       (let ((data (with-temp-buffer
                     (set-buffer-multibyte nil)
-                    (insert-file-contents-literally better-eww--frame-path)
+                    (insert-file-contents-literally embr--frame-path)
                     (buffer-string))))
-        (with-current-buffer better-eww--buffer
+        (with-current-buffer embr--buffer
           (let ((inhibit-read-only t))
             (erase-buffer)
             (insert-image (create-image data 'jpeg t))
@@ -274,77 +274,77 @@ This does NOT remove the Emacs package itself — use your package manager for t
             (remove-text-properties (point-min) (point-max) '(keymap nil))
             (put-text-property (point-min) (point-max) 'pointer 'arrow)
             (goto-char (point-min)))
-          (rename-buffer (format "*better-eww: %s*"
+          (rename-buffer (format "*embr: %s*"
                                  (if (string-empty-p title) url title))
                          t))))))
 
-(defun better-eww--action-callback (resp)
+(defun embr--action-callback (resp)
   "Generic callback for command responses: report errors."
   (when-let* ((err (alist-get 'error resp)))
-    (message "better-eww error: %s" err)))
+    (message "embr error: %s" err)))
 
 ;; ── Commands ───────────────────────────────────────────────────────
 
-(defun better-eww-execute-js (expr)
+(defun embr-execute-js (expr)
   "Execute JavaScript EXPR in the browser and display the result."
   (interactive "sJS: ")
-  (better-eww--send `((cmd . "js") (expr . ,expr))
+  (embr--send `((cmd . "js") (expr . ,expr))
                      (lambda (resp)
                        (if-let* ((err (alist-get 'error resp)))
-                           (message "better-eww JS error: %s" err)
+                           (message "embr JS error: %s" err)
                          (message "=> %s" (alist-get 'result resp))))))
 
-(defun better-eww--maybe-search-url (input)
+(defun embr--maybe-search-url (input)
   "If INPUT looks like a URL, return it as-is; otherwise build a search URL."
   (if (or (string-match-p "\\`https?://" input)
           (string-match-p "\\`file://" input)
           (and (string-match-p "\\." input)
                (not (string-match-p " " input))))
       input
-    (better-eww--search-url input)))
+    (embr--search-url input)))
 
-(defun better-eww-navigate (url)
+(defun embr-navigate (url)
   "Navigate to URL, or search if input doesn't look like a URL."
-  (interactive (list (completing-read "URL/Search: " better-eww--url-history nil nil nil
-                                      'better-eww--url-history)))
-  (let ((target (better-eww--maybe-search-url url)))
-    (push url better-eww--url-history)
-    (delete-dups better-eww--url-history)
-    (better-eww--send `((cmd . "navigate") (url . ,target))
-                       #'better-eww--action-callback)))
+  (interactive (list (completing-read "URL/Search: " embr--url-history nil nil nil
+                                      'embr--url-history)))
+  (let ((target (embr--maybe-search-url url)))
+    (push url embr--url-history)
+    (delete-dups embr--url-history)
+    (embr--send `((cmd . "navigate") (url . ,target))
+                       #'embr--action-callback)))
 
-(defun better-eww-refresh ()
+(defun embr-refresh ()
   "Refresh the current page."
   (interactive)
-  (better-eww--send '((cmd . "refresh"))
-                     #'better-eww--action-callback))
+  (embr--send '((cmd . "refresh"))
+                     #'embr--action-callback))
 
-(defun better-eww-back ()
+(defun embr-back ()
   "Go back in browser history."
   (interactive)
-  (better-eww--send '((cmd . "back"))
-                     #'better-eww--action-callback))
+  (embr--send '((cmd . "back"))
+                     #'embr--action-callback))
 
-(defun better-eww-forward ()
+(defun embr-forward ()
   "Go forward in browser history."
   (interactive)
-  (better-eww--send '((cmd . "forward"))
-                     #'better-eww--action-callback))
+  (embr--send '((cmd . "forward"))
+                     #'embr--action-callback))
 
-(defun better-eww-quit ()
+(defun embr-quit ()
   "Kill the daemon and close the buffer."
   (interactive)
-  (when (and better-eww--process (process-live-p better-eww--process))
-    (better-eww--send '((cmd . "quit")))
+  (when (and embr--process (process-live-p embr--process))
+    (embr--send '((cmd . "quit")))
     (sit-for 0.5)
-    (when (process-live-p better-eww--process)
-      (delete-process better-eww--process)))
-  (setq better-eww--process nil
-        better-eww--frame-path nil)
-  (when (buffer-live-p better-eww--buffer)
-    (kill-buffer better-eww--buffer)))
+    (when (process-live-p embr--process)
+      (delete-process embr--process)))
+  (setq embr--process nil
+        embr--frame-path nil)
+  (when (buffer-live-p embr--buffer)
+    (kill-buffer embr--buffer)))
 
-(defun better-eww-mouse-handler (event)
+(defun embr-mouse-handler (event)
   "Handle mouse press, track drag, and forward to browser."
   (interactive "e")
   (let* ((start-posn (event-start event))
@@ -352,7 +352,7 @@ This does NOT remove the Emacs package itself — use your package manager for t
          (start-x (car start-xy))
          (start-y (cdr start-xy)))
     (when (and start-x start-y)
-      (better-eww--send `((cmd . "mousedown") (x . ,start-x) (y . ,start-y)) nil)
+      (embr--send `((cmd . "mousedown") (x . ,start-x) (y . ,start-y)) nil)
       (let ((end-x start-x)
             (end-y start-y)
             (ev nil))
@@ -370,10 +370,10 @@ This does NOT remove the Emacs package itself — use your package manager for t
                  (xy (posn-object-x-y posn)))
             (when xy
               (setq end-x (car xy) end-y (cdr xy)))))
-        (better-eww--send `((cmd . "mouseup") (x . ,end-x) (y . ,end-y))
-                           #'better-eww--action-callback)))))
+        (embr--send `((cmd . "mouseup") (x . ,end-x) (y . ,end-y))
+                           #'embr--action-callback)))))
 
-(defun better-eww-double-click (event)
+(defun embr-double-click (event)
   "Handle double-click EVENT — select word in browser."
   (interactive "e")
   (let* ((posn (event-start event))
@@ -381,101 +381,101 @@ This does NOT remove the Emacs package itself — use your package manager for t
          (x (car xy))
          (y (cdr xy)))
     (when (and x y)
-      (better-eww--send `((cmd . "dblclick") (x . ,x) (y . ,y))
-                         #'better-eww--action-callback))))
+      (embr--send `((cmd . "dblclick") (x . ,x) (y . ,y))
+                         #'embr--action-callback))))
 
-(defun better-eww-scroll-down (event)
+(defun embr-scroll-down (event)
   "Scroll down in the browser on mouse wheel EVENT."
   (interactive "e")
   (let* ((posn (event-start event))
          (xy (posn-object-x-y posn))
          (x (or (car xy) 0))
          (y (or (cdr xy) 0)))
-    (better-eww--send `((cmd . "scroll") (x . ,x) (y . ,y)
+    (embr--send `((cmd . "scroll") (x . ,x) (y . ,y)
                          (delta_x . 0) (delta_y . 300))
-                       #'better-eww--action-callback)))
+                       #'embr--action-callback)))
 
-(defun better-eww-scroll-up (event)
+(defun embr-scroll-up (event)
   "Scroll up in the browser on mouse wheel EVENT."
   (interactive "e")
   (let* ((posn (event-start event))
          (xy (posn-object-x-y posn))
          (x (or (car xy) 0))
          (y (or (cdr xy) 0)))
-    (better-eww--send `((cmd . "scroll") (x . ,x) (y . ,y)
+    (embr--send `((cmd . "scroll") (x . ,x) (y . ,y)
                          (delta_x . 0) (delta_y . -300))
-                       #'better-eww--action-callback)))
+                       #'embr--action-callback)))
 
-(defun better-eww-zoom-in ()
+(defun embr-zoom-in ()
   "Increase viewport size (zoom in — larger viewport = more content)."
   (interactive)
-  (setq better-eww--viewport-width (+ better-eww--viewport-width 160)
-        better-eww--viewport-height (+ better-eww--viewport-height 90))
-  (better-eww--send `((cmd . "resize")
-                       (width . ,better-eww--viewport-width)
-                       (height . ,better-eww--viewport-height))
-                     #'better-eww--action-callback))
+  (setq embr--viewport-width (+ embr--viewport-width 160)
+        embr--viewport-height (+ embr--viewport-height 90))
+  (embr--send `((cmd . "resize")
+                       (width . ,embr--viewport-width)
+                       (height . ,embr--viewport-height))
+                     #'embr--action-callback))
 
-(defun better-eww-zoom-out ()
+(defun embr-zoom-out ()
   "Decrease viewport size (zoom out — smaller viewport = larger content)."
   (interactive)
-  (setq better-eww--viewport-width (max 320 (- better-eww--viewport-width 160))
-        better-eww--viewport-height (max 180 (- better-eww--viewport-height 90)))
-  (better-eww--send `((cmd . "resize")
-                       (width . ,better-eww--viewport-width)
-                       (height . ,better-eww--viewport-height))
-                     #'better-eww--action-callback))
+  (setq embr--viewport-width (max 320 (- embr--viewport-width 160))
+        embr--viewport-height (max 180 (- embr--viewport-height 90)))
+  (embr--send `((cmd . "resize")
+                       (width . ,embr--viewport-width)
+                       (height . ,embr--viewport-height))
+                     #'embr--action-callback))
 
 ;; ── Link hints ─────────────────────────────────────────────────────
 
-(defun better-eww-follow-hint ()
+(defun embr-follow-hint ()
   "Show link hints on all clickable elements, then follow the chosen one."
   (interactive)
-  (better-eww--send '((cmd . "hints"))
+  (embr--send '((cmd . "hints"))
                      (lambda (resp)
                        (if-let* ((err (alist-get 'error resp)))
-                           (message "better-eww error: %s" err)
+                           (message "embr error: %s" err)
                          (let* ((hints (alist-get 'hints resp))
                                 (tags (mapcar (lambda (h) (alist-get 'tag h)) hints)))
                            (if (null tags)
-                               (message "better-eww: no clickable elements found")
-                             (setq better-eww--hints hints)
+                               (message "embr: no clickable elements found")
+                             (setq embr--hints hints)
                              ;; Frame stream will show the hint overlays.
                              ;; Read user input after a brief pause for the frame to arrive.
-                             (run-at-time 0.1 nil #'better-eww--read-hint)))))))
+                             (run-at-time 0.1 nil #'embr--read-hint)))))))
 
-(defun better-eww--read-hint ()
+(defun embr--read-hint ()
   "Read a hint tag from the user and click it."
   (let* ((descriptions (mapcar (lambda (h)
                                  (format "%s: %s" (alist-get 'tag h)
                                          (alist-get 'text h)))
-                               better-eww--hints))
+                               embr--hints))
          (chosen (condition-case nil
                      (completing-read "Hint: " descriptions nil t)
                    (quit nil))))
     ;; Always clear hints, whether user picked one or cancelled.
-    (better-eww--send '((cmd . "hints-clear")) nil)
+    (embr--send '((cmd . "hints-clear")) nil)
     (when (and chosen (string-match "\\`\\([^:]+\\):" chosen))
       (let* ((tag (match-string 1 chosen))
              (hint (seq-find (lambda (h) (string= (alist-get 'tag h) tag))
-                             better-eww--hints)))
+                             embr--hints)))
         (when hint
-          (better-eww--send `((cmd . "click")
+          (embr--send `((cmd . "click")
                                (x . ,(alist-get 'x hint))
                                (y . ,(alist-get 'y hint)))
-                             #'better-eww--action-callback))))))
+                             #'embr--action-callback))))))
 
 ;; ── Text extraction ────────────────────────────────────────────────
 
-(defun better-eww-view-text ()
+(defun embr-view-text ()
   "Extract page text and display in a separate buffer."
   (interactive)
-  (better-eww--send '((cmd . "text"))
+  (embr--send '((cmd . "text"))
                      (lambda (resp)
                        (if-let* ((err (alist-get 'error resp)))
-                           (message "better-eww error: %s" err)
+                           (message "embr error: %s" err)
                          (let ((text (alist-get 'text resp))
-                               (buf (get-buffer-create "*better-eww-text*")))
+                               (buf (get-buffer-create "*embr-text*")))
                            (with-current-buffer buf
                              (let ((inhibit-read-only t))
                                (erase-buffer)
@@ -484,147 +484,147 @@ This does NOT remove the Emacs package itself — use your package manager for t
                              (view-mode 1))
                            (display-buffer buf))))))
 
-(defun better-eww-copy-url ()
+(defun embr-copy-url ()
   "Copy the current page URL to the kill ring."
   (interactive)
-  (kill-new better-eww--current-url)
-  (message "Copied: %s" better-eww--current-url))
+  (kill-new embr--current-url)
+  (message "Copied: %s" embr--current-url))
 
 ;; ── Resolution toggle ─────────────────────────────────────────────
 
-(defvar better-eww--resolutions
+(defvar embr--resolutions
   '((393 . 852) (1280 . 720) (1920 . 1080))
   "List of (width . height) pairs to cycle through.")
 
-(defun better-eww-cycle-resolution ()
+(defun embr-cycle-resolution ()
   "Cycle viewport through 720p → 1080p → 1440p → 4K."
   (interactive)
-  (let* ((current (cons better-eww--viewport-width better-eww--viewport-height))
-         (pos (cl-position current better-eww--resolutions :test #'equal))
-         (next (nth (mod (1+ (or pos -1)) (length better-eww--resolutions))
-                    better-eww--resolutions)))
-    (setq better-eww--viewport-width (car next)
-          better-eww--viewport-height (cdr next))
-    (better-eww--send `((cmd . "resize")
+  (let* ((current (cons embr--viewport-width embr--viewport-height))
+         (pos (cl-position current embr--resolutions :test #'equal))
+         (next (nth (mod (1+ (or pos -1)) (length embr--resolutions))
+                    embr--resolutions)))
+    (setq embr--viewport-width (car next)
+          embr--viewport-height (cdr next))
+    (embr--send `((cmd . "resize")
                          (width . ,(car next))
                          (height . ,(cdr next)))
-                       #'better-eww--action-callback)
+                       #'embr--action-callback)
     (message "Viewport: %dx%d" (car next) (cdr next))))
 
 ;; ── External player ───────────────────────────────────────────────
 
-(defun better-eww-play-external ()
-  "Play the current URL with yt-dlp piped to `better-eww-external-player'."
+(defun embr-play-external ()
+  "Play the current URL with yt-dlp piped to `embr-external-player'."
   (interactive)
-  (let ((url better-eww--current-url))
+  (let ((url embr--current-url))
     (if (string-empty-p url)
-        (message "better-eww: no URL to play")
-      (message "Playing in %s: %s" better-eww-external-player url)
+        (message "embr: no URL to play")
+      (message "Playing in %s: %s" embr-external-player url)
       (start-process-shell-command
-       "better-eww-player" nil
+       "embr-player" nil
        (format "yt-dlp -o - %s | %s -"
                (shell-quote-argument url)
-               better-eww-external-player)))))
+               embr-external-player)))))
 
 ;; ── Find in page ───────────────────────────────────────────────────
 
-(defvar better-eww--search-query "" "Current find-in-page query.")
-(defvar better-eww--searching nil "Non-nil when in a search sequence.")
+(defvar embr--search-query "" "Current find-in-page query.")
+(defvar embr--searching nil "Non-nil when in a search sequence.")
 
-(defun better-eww--maybe-end-search ()
+(defun embr--maybe-end-search ()
   "Clear search state if the next command is not a search command."
-  (unless (memq this-command '(better-eww-isearch-forward better-eww-isearch-backward))
-    (setq better-eww--searching nil)))
+  (unless (memq this-command '(embr-isearch-forward embr-isearch-backward))
+    (setq embr--searching nil)))
 
-(defun better-eww--find-on-page (backwards)
+(defun embr--find-on-page (backwards)
   "Run window.find() with the current search query.  Search BACKWARDS if non-nil."
-  (setq better-eww--searching t)
-  (let ((escaped (replace-regexp-in-string "'" "\\\\'" better-eww--search-query)))
-    (better-eww--send
+  (setq embr--searching t)
+  (let ((escaped (replace-regexp-in-string "'" "\\\\'" embr--search-query)))
+    (embr--send
      `((cmd . "js")
        (expr . ,(format "window.find('%s', false, %s, true)"
                         escaped (if backwards "true" "false"))))
      (lambda (resp)
        (if-let* ((err (alist-get 'error resp)))
-           (message "better-eww find error: %s" err)
+           (message "embr find error: %s" err)
          (if (eq (alist-get 'result resp) :json-false)
-             (message "better-eww: no more matches")
-           (message "Search: %s" better-eww--search-query)))))))
+             (message "embr: no more matches")
+           (message "Search: %s" embr--search-query)))))))
 
-(defun better-eww-isearch-forward ()
+(defun embr-isearch-forward ()
   "Search forward.  First call prompts for query; repeating finds next match."
   (interactive)
-  (if (and better-eww--searching
-           (not (string-empty-p better-eww--search-query)))
-      (better-eww--find-on-page nil)
-    (setq better-eww--searching nil)
-    (let ((query (read-string "Search: " better-eww--search-query)))
+  (if (and embr--searching
+           (not (string-empty-p embr--search-query)))
+      (embr--find-on-page nil)
+    (setq embr--searching nil)
+    (let ((query (read-string "Search: " embr--search-query)))
       (unless (string-empty-p query)
-        (setq better-eww--search-query query)
-        (better-eww--find-on-page nil)))))
+        (setq embr--search-query query)
+        (embr--find-on-page nil)))))
 
-(defun better-eww-isearch-backward ()
+(defun embr-isearch-backward ()
   "Search backward.  First call prompts for query; repeating finds previous match."
   (interactive)
-  (if (and better-eww--searching
-           (not (string-empty-p better-eww--search-query)))
-      (better-eww--find-on-page t)
-    (setq better-eww--searching nil)
-    (let ((query (read-string "Search backward: " better-eww--search-query)))
+  (if (and embr--searching
+           (not (string-empty-p embr--search-query)))
+      (embr--find-on-page t)
+    (setq embr--searching nil)
+    (let ((query (read-string "Search backward: " embr--search-query)))
       (unless (string-empty-p query)
-        (setq better-eww--search-query query)
-        (better-eww--find-on-page t)))))
+        (setq embr--search-query query)
+        (embr--find-on-page t)))))
 
 ;; ── Tabs ───────────────────────────────────────────────────────────
 
-(defun better-eww-new-tab (url)
+(defun embr-new-tab (url)
   "Open URL in a new tab."
   (interactive "sURL for new tab: ")
-  (better-eww--send `((cmd . "new-tab") (url . ,url))
-                     #'better-eww--action-callback))
+  (embr--send `((cmd . "new-tab") (url . ,url))
+                     #'embr--action-callback))
 
-(defun better-eww-close-tab ()
+(defun embr-close-tab ()
   "Close the current tab."
   (interactive)
-  (better-eww--send '((cmd . "close-tab"))
-                     #'better-eww--action-callback))
+  (embr--send '((cmd . "close-tab"))
+                     #'embr--action-callback))
 
-(defun better-eww-next-tab ()
+(defun embr-next-tab ()
   "Switch to the next tab."
   (interactive)
-  (better-eww--send '((cmd . "list-tabs"))
+  (embr--send '((cmd . "list-tabs"))
                      (lambda (resp)
                        (if-let* ((err (alist-get 'error resp)))
-                           (message "better-eww error: %s" err)
+                           (message "embr error: %s" err)
                          (let* ((tabs (alist-get 'tabs resp))
                                 (cur (seq-position tabs t
                                        (lambda (tab _) (eq (alist-get 'active tab) t))))
                                 (next (if cur (mod (1+ cur) (length tabs)) 0)))
-                           (better-eww--send `((cmd . "switch-tab") (index . ,next))
-                                              #'better-eww--action-callback))))))
+                           (embr--send `((cmd . "switch-tab") (index . ,next))
+                                              #'embr--action-callback))))))
 
-(defun better-eww-prev-tab ()
+(defun embr-prev-tab ()
   "Switch to the previous tab."
   (interactive)
-  (better-eww--send '((cmd . "list-tabs"))
+  (embr--send '((cmd . "list-tabs"))
                      (lambda (resp)
                        (if-let* ((err (alist-get 'error resp)))
-                           (message "better-eww error: %s" err)
+                           (message "embr error: %s" err)
                          (let* ((tabs (alist-get 'tabs resp))
                                 (cur (seq-position tabs t
                                        (lambda (tab _) (eq (alist-get 'active tab) t))))
                                 (prev (if cur (mod (1- cur) (length tabs))
                                         (1- (length tabs)))))
-                           (better-eww--send `((cmd . "switch-tab") (index . ,prev))
-                                              #'better-eww--action-callback))))))
+                           (embr--send `((cmd . "switch-tab") (index . ,prev))
+                                              #'embr--action-callback))))))
 
-(defun better-eww-list-tabs ()
+(defun embr-list-tabs ()
   "List all tabs and switch to the selected one."
   (interactive)
-  (better-eww--send '((cmd . "list-tabs"))
+  (embr--send '((cmd . "list-tabs"))
                      (lambda (resp)
                        (if-let* ((err (alist-get 'error resp)))
-                           (message "better-eww error: %s" err)
+                           (message "embr error: %s" err)
                          (let* ((tabs (alist-get 'tabs resp))
                                 (strs (mapcar
                                        (lambda (tab)
@@ -636,61 +636,61 @@ This does NOT remove the Emacs package itself — use your package manager for t
                                 (chosen (completing-read "Tab: " strs nil t)))
                            (when (string-match "\\*?\\([0-9]+\\):" chosen)
                              (let ((idx (string-to-number (match-string 1 chosen))))
-                               (better-eww--send `((cmd . "switch-tab") (index . ,idx))
-                                                  #'better-eww--action-callback))))))))
+                               (embr--send `((cmd . "switch-tab") (index . ,idx))
+                                                  #'embr--action-callback))))))))
 
 ;; ── Form fill ──────────────────────────────────────────────────────
 
-(defun better-eww-fill (selector value)
+(defun embr-fill (selector value)
   "Fill a form field matching CSS SELECTOR with VALUE."
   (interactive "sCSS selector: \nsValue: ")
-  (better-eww--send `((cmd . "fill") (selector . ,selector) (value . ,value))
-                     #'better-eww--action-callback))
+  (embr--send `((cmd . "fill") (selector . ,selector) (value . ,value))
+                     #'embr--action-callback))
 
 ;; ── Bookmarks ──────────────────────────────────────────────────────
 
-(defun better-eww--bookmark-make-record ()
-  "Create a bookmark record for the current better-eww page."
-  `(,(format "better-eww: %s" better-eww--current-title)
-    (url . ,better-eww--current-url)
-    (handler . better-eww--bookmark-handler)))
+(defun embr--bookmark-make-record ()
+  "Create a bookmark record for the current embr page."
+  `(,(format "embr: %s" embr--current-title)
+    (url . ,embr--current-url)
+    (handler . embr--bookmark-handler)))
 
-(defun better-eww--bookmark-handler (bookmark)
-  "Jump to a better-eww BOOKMARK."
-  (better-eww-browse (alist-get 'url (cdr bookmark))))
+(defun embr--bookmark-handler (bookmark)
+  "Jump to a embr BOOKMARK."
+  (embr-browse (alist-get 'url (cdr bookmark))))
 
 ;; ── Clipboard bridge ──────────────────────────────────────────────
 
-(defun better-eww-copy ()
+(defun embr-copy ()
   "Copy browser selection to Emacs kill ring and system clipboard."
   (interactive)
-  (better-eww--send
+  (embr--send
    '((cmd . "js") (expr . "window.getSelection().toString()"))
    (lambda (resp)
      (if-let* ((err (alist-get 'error resp)))
-         (message "better-eww copy error: %s" err)
+         (message "embr copy error: %s" err)
        (let ((text (alist-get 'result resp)))
          (if (and text (not (equal text "")))
              (progn
                (kill-new text)
                (message "Copied: %s" (truncate-string-to-width text 60)))
-           (message "better-eww: no selection to copy")))))))
+           (message "embr: no selection to copy")))))))
 
-(defun better-eww-paste ()
+(defun embr-paste ()
   "Paste from Emacs kill ring into the browser."
   (interactive)
   (let ((text (current-kill 0 t)))
     (if (and text (not (string-empty-p text)))
-        (better-eww--send
+        (embr--send
          `((cmd . "js")
            (expr . ,(format "document.execCommand('insertText', false, %s)"
                             (json-encode text))))
-         #'better-eww--action-callback)
-      (message "better-eww: kill ring empty"))))
+         #'embr--action-callback)
+      (message "embr: kill ring empty"))))
 
 ;; ── Key forwarding ─────────────────────────────────────────────────
 
-(defun better-eww--translate-key (key)
+(defun embr--translate-key (key)
   "Translate an Emacs KEY description to a Playwright key name."
   (pcase key
     ("RET" "Enter")
@@ -723,129 +723,129 @@ This does NOT remove the Emacs package itself — use your package manager for t
     ("<escape>" "Escape")
     (_ key)))
 
-(defun better-eww-self-insert ()
+(defun embr-self-insert ()
   "Forward the current key to the browser."
   (interactive)
   (let* ((keys (this-command-keys-vector))
          (key-desc (key-description keys))
-         (pw-key (better-eww--translate-key key-desc)))
+         (pw-key (embr--translate-key key-desc)))
     (if (= (length pw-key) 1)
-        (better-eww--send `((cmd . "type") (text . ,pw-key))
-                           #'better-eww--action-callback)
-      (better-eww--send `((cmd . "key") (key . ,pw-key))
-                         #'better-eww--action-callback))))
+        (embr--send `((cmd . "type") (text . ,pw-key))
+                           #'embr--action-callback)
+      (embr--send `((cmd . "key") (key . ,pw-key))
+                         #'embr--action-callback))))
 
 ;; ── Keymap ─────────────────────────────────────────────────────────
 
-(defvar better-eww-mode-map nil "Keymap for `better-eww-mode'.")
-(setq better-eww-mode-map
+(defvar embr-mode-map nil "Keymap for `embr-mode'.")
+(setq embr-mode-map
   (let ((map (make-sparse-keymap)))
     ;; All printable characters → forward to browser.
     (dolist (c (number-sequence 32 126))
-      (define-key map (vector c) #'better-eww-self-insert))
+      (define-key map (vector c) #'embr-self-insert))
     ;; Override & for external player (like eww).
-    (define-key map (kbd "&") #'better-eww-play-external)
-    (define-key map (kbd "<f5>") #'better-eww-cycle-resolution)
+    (define-key map (kbd "&") #'embr-play-external)
+    (define-key map (kbd "<f5>") #'embr-cycle-resolution)
     ;; Special keys → forward to browser.
     (dolist (key '("<return>" "<backspace>" "<tab>" "<delete>"
                    "<home>" "<end>" "<up>" "<down>" "<left>" "<right>"
                    "<prior>" "<next>" "<escape>"))
-      (define-key map (kbd key) #'better-eww-self-insert))
+      (define-key map (kbd key) #'embr-self-insert))
 
     ;; Emacs-style convenience bindings.
-    (define-key map (kbd "C-v") #'better-eww-self-insert)
-    (define-key map (kbd "M-v") #'better-eww-self-insert)
-    (define-key map (kbd "C-l") #'better-eww-navigate)
-    (define-key map (kbd "C-n") #'better-eww-self-insert)
-    (define-key map (kbd "C-p") #'better-eww-self-insert)
-    (define-key map (kbd "C-b") #'better-eww-self-insert)
-    (define-key map (kbd "C-f") #'better-eww-self-insert)
-    (define-key map (kbd "C-a") #'better-eww-self-insert)
-    (define-key map (kbd "C-e") #'better-eww-self-insert)
-    (define-key map (kbd "C-d") #'better-eww-self-insert)
-    (define-key map (kbd "M-f") #'better-eww-self-insert)
-    (define-key map (kbd "M-b") #'better-eww-self-insert)
-    (define-key map (kbd "M-w") #'better-eww-copy)
-    (define-key map (kbd "C-y") #'better-eww-paste)
-    (define-key map (kbd "C-s") #'better-eww-isearch-forward)
-    (define-key map (kbd "C-r") #'better-eww-isearch-backward)
+    (define-key map (kbd "C-v") #'embr-self-insert)
+    (define-key map (kbd "M-v") #'embr-self-insert)
+    (define-key map (kbd "C-l") #'embr-navigate)
+    (define-key map (kbd "C-n") #'embr-self-insert)
+    (define-key map (kbd "C-p") #'embr-self-insert)
+    (define-key map (kbd "C-b") #'embr-self-insert)
+    (define-key map (kbd "C-f") #'embr-self-insert)
+    (define-key map (kbd "C-a") #'embr-self-insert)
+    (define-key map (kbd "C-e") #'embr-self-insert)
+    (define-key map (kbd "C-d") #'embr-self-insert)
+    (define-key map (kbd "M-f") #'embr-self-insert)
+    (define-key map (kbd "M-b") #'embr-self-insert)
+    (define-key map (kbd "M-w") #'embr-copy)
+    (define-key map (kbd "C-y") #'embr-paste)
+    (define-key map (kbd "C-s") #'embr-isearch-forward)
+    (define-key map (kbd "C-r") #'embr-isearch-backward)
 
     ;; Mouse → forward to browser.
-    (define-key map [down-mouse-1] #'better-eww-mouse-handler)
-    (define-key map [double-mouse-1] #'better-eww-double-click)
-    (define-key map [wheel-down] #'better-eww-scroll-down)
-    (define-key map [wheel-up] #'better-eww-scroll-up)
+    (define-key map [down-mouse-1] #'embr-mouse-handler)
+    (define-key map [double-mouse-1] #'embr-double-click)
+    (define-key map [wheel-down] #'embr-scroll-down)
+    (define-key map [wheel-up] #'embr-scroll-up)
 
     ;; Browser commands under C-c prefix (Emacs convention for major modes).
-    (define-key map (kbd "C-c l") #'better-eww-navigate)
-    (define-key map (kbd "C-c r") #'better-eww-refresh)
-    (define-key map (kbd "C-c b") #'better-eww-back)
-    (define-key map (kbd "C-c f") #'better-eww-forward)
-    (define-key map (kbd "C-c q") #'better-eww-quit)
-    (define-key map (kbd "C-c C-k") #'better-eww-quit)
-    (define-key map (kbd "C-c +") #'better-eww-zoom-in)
-    (define-key map (kbd "C-c -") #'better-eww-zoom-out)
-    (define-key map (kbd "C-c h") #'better-eww-follow-hint)
-    (define-key map (kbd "C-c t") #'better-eww-view-text)
-    (define-key map (kbd "C-c w") #'better-eww-copy-url)
-    (define-key map (kbd "C-c s") #'better-eww-isearch-forward)
-    (define-key map (kbd "C-c n") #'better-eww-new-tab)
-    (define-key map (kbd "C-c d") #'better-eww-close-tab)
-    (define-key map (kbd "C-c ]") #'better-eww-next-tab)
-    (define-key map (kbd "C-c [") #'better-eww-prev-tab)
-    (define-key map (kbd "C-c a") #'better-eww-list-tabs)
-    (define-key map (kbd "C-c :") #'better-eww-execute-js)
+    (define-key map (kbd "C-c l") #'embr-navigate)
+    (define-key map (kbd "C-c r") #'embr-refresh)
+    (define-key map (kbd "C-c b") #'embr-back)
+    (define-key map (kbd "C-c f") #'embr-forward)
+    (define-key map (kbd "C-c q") #'embr-quit)
+    (define-key map (kbd "C-c C-k") #'embr-quit)
+    (define-key map (kbd "C-c +") #'embr-zoom-in)
+    (define-key map (kbd "C-c -") #'embr-zoom-out)
+    (define-key map (kbd "C-c h") #'embr-follow-hint)
+    (define-key map (kbd "C-c t") #'embr-view-text)
+    (define-key map (kbd "C-c w") #'embr-copy-url)
+    (define-key map (kbd "C-c s") #'embr-isearch-forward)
+    (define-key map (kbd "C-c n") #'embr-new-tab)
+    (define-key map (kbd "C-c d") #'embr-close-tab)
+    (define-key map (kbd "C-c ]") #'embr-next-tab)
+    (define-key map (kbd "C-c [") #'embr-prev-tab)
+    (define-key map (kbd "C-c a") #'embr-list-tabs)
+    (define-key map (kbd "C-c :") #'embr-execute-js)
     map))
 
 ;; ── Major mode ─────────────────────────────────────────────────────
 
-(define-derived-mode better-eww-mode nil "better-eww"
-  "Major mode for the better-eww browser buffer."
-  :group 'better-eww
+(define-derived-mode embr-mode nil "embr"
+  "Major mode for the embr browser buffer."
+  :group 'embr
   (setq-local buffer-read-only t)
   (setq-local cursor-type nil)
   (setq-local void-text-area-pointer 'arrow)
   (setq-local pointer-shape 'arrow)
-  (setq-local bookmark-make-record-function #'better-eww--bookmark-make-record)
-  (add-hook 'pre-command-hook #'better-eww--maybe-end-search nil t))
+  (setq-local bookmark-make-record-function #'embr--bookmark-make-record)
+  (add-hook 'pre-command-hook #'embr--maybe-end-search nil t))
 
 ;; ── Entry point ────────────────────────────────────────────────────
 
 ;;;###autoload
-(defun better-eww-browse (url)
-  "Launch better-eww and navigate to URL.
+(defun embr-browse (url)
+  "Launch embr and navigate to URL.
 If the daemon is already running, just navigate to the new URL."
   (interactive "sURL: ")
   ;; Check if setup has been run.
-  (when (better-eww--setup-needed-p)
-    (if (y-or-n-p "better-eww: Python venv not found. Run setup now? ")
+  (when (embr--setup-needed-p)
+    (if (y-or-n-p "embr: Python venv not found. Run setup now? ")
         (progn
-          (better-eww-setup-or-update)
-          (error "better-eww: Setup started in *better-eww-setup* buffer. Run M-x better-eww-browse again when it finishes"))
-      (error "better-eww: Run M-x better-eww-setup-or-update first")))
+          (embr-setup-or-update)
+          (error "embr: Setup started in *embr-setup* buffer. Run M-x embr-browse again when it finishes"))
+      (error "embr: Run M-x embr-setup-or-update first")))
   ;; Create buffer if needed.
-  (unless (buffer-live-p better-eww--buffer)
-    (setq better-eww--buffer (generate-new-buffer "*better-eww*"))
-    (with-current-buffer better-eww--buffer
-      (better-eww-mode)))
+  (unless (buffer-live-p embr--buffer)
+    (setq embr--buffer (generate-new-buffer "*embr*"))
+    (with-current-buffer embr--buffer
+      (embr-mode)))
   ;; Start daemon if needed.
-  (unless (and better-eww--process (process-live-p better-eww--process))
-    (setq better-eww--viewport-width (or better-eww--viewport-width better-eww-default-width)
-          better-eww--viewport-height (or better-eww--viewport-height better-eww-default-height))
-    (better-eww--start-daemon)
-    (let ((resp (better-eww--send-sync
+  (unless (and embr--process (process-live-p embr--process))
+    (setq embr--viewport-width (or embr--viewport-width embr-default-width)
+          embr--viewport-height (or embr--viewport-height embr-default-height))
+    (embr--start-daemon)
+    (let ((resp (embr--send-sync
                  `((cmd . "init")
-                   (width . ,better-eww--viewport-width)
-                   (height . ,better-eww--viewport-height)
-                   (fps . ,better-eww-fps)))))
+                   (width . ,embr--viewport-width)
+                   (height . ,embr--viewport-height)
+                   (fps . ,embr-fps)))))
       (if (alist-get 'error resp)
-          (error "better-eww: init failed: %s" (alist-get 'error resp))
+          (error "embr: init failed: %s" (alist-get 'error resp))
         ;; Daemon tells us where it writes frames.
-        (setq better-eww--frame-path (alist-get 'frame_path resp)))))
+        (setq embr--frame-path (alist-get 'frame_path resp)))))
   ;; Show buffer and navigate.
-  (switch-to-buffer better-eww--buffer)
-  (better-eww-navigate url))
+  (switch-to-buffer embr--buffer)
+  (embr-navigate url))
 
-(provide 'better-eww)
+(provide 'embr)
 
-;;; better-eww.el ends here
+;;; embr.el ends here

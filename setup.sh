@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/better-eww"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/embr"
 VENV_DIR="$DATA_DIR/.venv"
 TMP_VENV="$DATA_DIR/.venv.tmp"
 
@@ -34,7 +34,7 @@ fi
 mv "$TMP_VENV" "$VENV_DIR"
 rm -rf "$VENV_DIR.old"
 
-# Download ad/tracker blocklist into the package dir (next to better-eww.py).
+# Download ad/tracker blocklist into the package dir (next to embr.py).
 BLOCKLIST="$SCRIPT_DIR/blocklist.txt"
 echo "Downloading ad blocklist..."
 curl -sL "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts" \
