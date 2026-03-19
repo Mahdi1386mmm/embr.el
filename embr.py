@@ -134,8 +134,9 @@ async def main():
                 pass
             return {"ok": True}
 
-        if cmd == "dblclick":
-            await page.mouse.dblclick(params["x"], params["y"])
+
+        if cmd == "mousemove":
+            await page.mouse.move(params["x"], params["y"])
             return {"ok": True}
 
         if cmd == "type":

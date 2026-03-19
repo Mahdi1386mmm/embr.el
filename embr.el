@@ -196,6 +196,9 @@ This does NOT remove the Emacs package itself — use your package manager for t
 (defvar embr--frame-path nil "Path to the JPEG frame file written by the daemon.")
 (defvar embr--url-history nil "History of visited URLs for completion.")
 (defvar embr--hints nil "Current hint labels alist from the daemon.")
+(defvar embr--hover-timer nil "Timer for mouse hover tracking.")
+(defvar embr--hover-last-x nil "Last hover X coordinate sent.")
+(defvar embr--hover-last-y nil "Last hover Y coordinate sent.")
 
 ;; ── Process management ─────────────────────────────────────────────
 
@@ -359,6 +362,7 @@ This does NOT remove the Emacs package itself — use your package manager for t
     (sit-for 0.5)
     (when (process-live-p embr--process)
       (delete-process embr--process)))
+  (embr--hover-stop)
   (setq embr--process nil
         embr--frame-path nil)
   (when (buffer-live-p embr--buffer)
@@ -471,6 +475,43 @@ Better compatibility with iframe widgets like Cloudflare Turnstile."
                          (delta_x . 0) (delta_y . ,(- delta))
                          (behavior . ,(embr--scroll-behavior)))
                        #'embr--action-callback)))
+
+;; ── Hover tracking ────────────────────────────────────────────────
+
+(defun embr--hover-tick ()
+  "Send mouse position to the browser if it changed.  Runs on a timer."
+  (when (and embr--process (process-live-p embr--process)
+             (buffer-live-p embr--buffer)
+             (eq (current-buffer) embr--buffer))
+    (let* ((pos (mouse-pixel-position))
+           (frame (car pos))
+           (px (cadr pos))
+           (py (cddr pos)))
+      (when (and frame px py (eq frame (selected-frame)))
+        ;; Convert frame pixel position to image coordinates.
+        (let* ((win (get-buffer-window embr--buffer))
+               (edges (and win (window-inside-pixel-edges win)))
+               (img-x (and edges (- px (nth 0 edges))))
+               (img-y (and edges (- py (nth 1 edges)))))
+          (when (and img-x img-y (>= img-x 0) (>= img-y 0)
+                     (not (and (eql img-x embr--hover-last-x)
+                               (eql img-y embr--hover-last-y))))
+            (setq embr--hover-last-x img-x
+                  embr--hover-last-y img-y)
+            (embr--send `((cmd . "mousemove") (x . ,img-x) (y . ,img-y)) nil)))))))
+
+(defun embr--hover-start ()
+  "Start the hover tracking timer."
+  (embr--hover-stop)
+  (setq embr--hover-timer (run-at-time 0 (/ 1.0 15) #'embr--hover-tick)))
+
+(defun embr--hover-stop ()
+  "Stop the hover tracking timer."
+  (when embr--hover-timer
+    (cancel-timer embr--hover-timer)
+    (setq embr--hover-timer nil
+          embr--hover-last-x nil
+          embr--hover-last-y nil)))
 
 (defun embr-zoom-in ()
   "Increase viewport size (zoom in — larger viewport = more content)."
@@ -908,7 +949,8 @@ If the daemon is already running, just navigate to the new URL."
       (if (alist-get 'error resp)
           (error "embr: init failed: %s" (alist-get 'error resp))
         ;; Daemon tells us where it writes frames.
-        (setq embr--frame-path (alist-get 'frame_path resp)))))
+        (setq embr--frame-path (alist-get 'frame_path resp))
+        (embr--hover-start))))
   ;; Show buffer and navigate.
   (switch-to-buffer embr--buffer)
   (embr-navigate url))
