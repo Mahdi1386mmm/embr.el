@@ -10,13 +10,7 @@ Emacs is the display server. Headless Firefox is the renderer.
 
 ## Installation
 
-<table>
-<tr>
-<td> <b>Elpaca</b> </td>
-<td> <b>straight.el</b> </td>
-</tr>
-<tr>
-<td>
+**Elpaca**
 
 ```elisp
 (use-package embr
@@ -35,8 +29,7 @@ Emacs is the display server. Headless Firefox is the renderer.
         embr-external-command "yt-dlp -o - %s | mpv -")) ; Shell command for & key (%s = URL)
 ```
 
-</td>
-<td>
+**straight.el**
 
 ```elisp
 (use-package embr
@@ -54,10 +47,6 @@ Emacs is the display server. Headless Firefox is the renderer.
         embr-fullscreen-hack t          ; nil to use native (broken) fullscreen
         embr-external-command "yt-dlp -o - %s | mpv -")) ; Shell command for & key (%s = URL)
 ```
-
-</td>
-</tr>
-</table>
 
 ## Setup
 
