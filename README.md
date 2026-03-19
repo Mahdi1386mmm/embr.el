@@ -126,6 +126,8 @@ M-x embr-browse RET https://example.com RET
 
 All keys are forwarded directly to the browser. Typing, arrows, backspace, tab, and enter work as expected. `C-x`, `M-x`, etc. stay free for Emacs.
 
+The top-level keybindings below translate familiar Emacs motion keys into their browser equivalents — if you're familiar with EXWM, same concept as simulation keys.
+
 | Key | Action |
 |-----|--------|
 | `C-l` | Go to URL or search (with history completion) |
@@ -153,7 +155,7 @@ All keys are forwarded directly to the browser. Typing, arrows, backspace, tab, 
 
 ### Browser commands
 
-Browser commands use the `C-c` prefix — the same eww-style commands, just behind a prefix instead of on top-level keys. This gives a more natural Firefox typing experience while keeping power tools a combo away.
+Browser commands use the `C-c` prefix — eww-inspired commands, just behind a prefix instead of on top-level keys. This gives a more natural Firefox typing experience while keeping power tools a combo away.
 
 | Key | Action |
 |-----|--------|
@@ -174,7 +176,6 @@ Browser commands use the `C-c` prefix — the same eww-style commands, just behi
 | `C-c a` | List all tabs |
 | Mouse click | Click at coordinates |
 | Click and drag | Select text |
-
 | Scroll wheel | Scroll page |
 
 ### Bookmarks
