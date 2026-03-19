@@ -90,7 +90,7 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 
 | What | Path |
 |------|------|
-| Python venv | `<package-dir>/.venv/` |
+| Python venv | `~/.local/share/better-eww/.venv/` |
 | Playwright browsers | `~/.cache/ms-playwright/` |
 | Cookies & sessions | `~/.local/share/better-eww/firefox-profile/` |
 

@@ -1,14 +1,11 @@
 #!/bin/bash
 set -euo pipefail
-cd "$(dirname "$0")"
 
-VENV_DIR=".venv"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/better-eww"
 BROWSERS_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/ms-playwright"
-PROFILE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/better-eww"
 
 echo "This will delete:"
-echo "  Python venv:         $(pwd)/$VENV_DIR"
-echo "  Browser profile:     $PROFILE_DIR"
+echo "  Data dir (venv + profile):  $DATA_DIR"
 echo ""
 
 read -rp "Proceed? [y/N] " confirm
@@ -17,18 +14,11 @@ if [[ "$confirm" != [yY] ]]; then
     exit 0
 fi
 
-if [ -d "$VENV_DIR" ]; then
-    rm -rf "$VENV_DIR"
-    echo "Deleted $VENV_DIR"
+if [ -d "$DATA_DIR" ]; then
+    rm -rf "$DATA_DIR"
+    echo "Deleted $DATA_DIR"
 else
-    echo "$VENV_DIR not found, skipping."
-fi
-
-if [ -d "$PROFILE_DIR" ]; then
-    rm -rf "$PROFILE_DIR"
-    echo "Deleted $PROFILE_DIR"
-else
-    echo "$PROFILE_DIR not found, skipping."
+    echo "$DATA_DIR not found, skipping."
 fi
 
 echo ""

@@ -1,16 +1,19 @@
 #!/bin/bash
 set -euo pipefail
-cd "$(dirname "$0")"
 
-VENV_DIR=".venv"
-TMP_VENV=".venv.tmp"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/better-eww"
+VENV_DIR="$DATA_DIR/.venv"
+TMP_VENV="$DATA_DIR/.venv.tmp"
+
+mkdir -p "$DATA_DIR"
 
 cleanup() {
     if [ $? -ne 0 ]; then
         echo "ERROR: Setup failed. Cleaning up..." >&2
         rm -rf "$TMP_VENV"
-        if [ -d ".venv.old" ]; then
-            mv ".venv.old" "$VENV_DIR"
+        if [ -d "$VENV_DIR.old" ]; then
+            mv "$VENV_DIR.old" "$VENV_DIR"
             echo "Rolled back to previous venv." >&2
         fi
         exit 1
@@ -26,13 +29,13 @@ python3 -m venv "$TMP_VENV"
 
 # Swap atomically.
 if [ -d "$VENV_DIR" ]; then
-    mv "$VENV_DIR" ".venv.old"
+    mv "$VENV_DIR" "$VENV_DIR.old"
 fi
 mv "$TMP_VENV" "$VENV_DIR"
-rm -rf ".venv.old"
+rm -rf "$VENV_DIR.old"
 
-# Download ad/tracker blocklist.
-BLOCKLIST="blocklist.txt"
+# Download ad/tracker blocklist into the package dir (next to better-eww.py).
+BLOCKLIST="$SCRIPT_DIR/blocklist.txt"
 echo "Downloading ad blocklist..."
 curl -sL "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts" \
     | grep "^0\.0\.0\.0 " \

@@ -31,8 +31,13 @@
 With :files in the package recipe, Elpaca/straight symlink .py and .sh
 alongside the .el in the builds dir, so this just works.")
 
+(defvar better-eww--data-dir
+  (expand-file-name "better-eww" (or (getenv "XDG_DATA_HOME")
+                                      (expand-file-name ".local/share" "~")))
+  "Directory for persistent better-eww data (~/.local/share/better-eww/).")
+
 (defcustom better-eww-python
-  (expand-file-name ".venv/bin/python" better-eww--directory)
+  (expand-file-name ".venv/bin/python" better-eww--data-dir)
   "Path to the Python interpreter inside the project venv."
   :type 'file)
 
@@ -132,7 +137,7 @@ This does NOT remove the Emacs package itself — use your package manager for t
 (defun better-eww-info ()
   "Show diagnostic info about the better-eww installation."
   (interactive)
-  (let ((venv-dir (expand-file-name ".venv" better-eww--directory))
+  (let ((venv-dir (expand-file-name ".venv" better-eww--data-dir))
         (browsers-dir (expand-file-name "ms-playwright" (or (getenv "XDG_CACHE_HOME")
                                                             (expand-file-name ".cache" "~"))))
         (profile-dir (expand-file-name "better-eww" (or (getenv "XDG_DATA_HOME")
