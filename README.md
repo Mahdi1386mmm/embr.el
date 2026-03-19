@@ -120,3 +120,16 @@ Standard Emacs bookmarks work: `C-x r m` to save, `C-x r b` to jump.
 Emacs spawns a Python subprocess (`better-eww.py`) that controls headless Firefox through Playwright. They communicate via JSON lines over stdin/stdout. The daemon streams JPEG screenshots at ~30 FPS via a temp file on disk, giving live visual feedback.
 
 Browser sessions persist across restarts — cookies and login state are stored in `~/.local/share/better-eww/firefox-profile/`.
+
+## FAQ
+
+### Google won't let me sign in
+
+![Google sign-in blocked](assets/google-sign-in-blocked.png)
+
+Google actively detects and blocks automated/headless browsers. This is a Google-side restriction, not a bug in better-eww. Other major sites that do this include Microsoft and Apple.
+
+**Workarounds:**
+- Use app passwords or sign into Google in a regular browser first, then export/import cookies
+- Sign in via a site that uses Google OAuth but is less strict about browser fingerprinting
+- Most other sites (Discord, Reddit, GitHub, etc.) work fine

@@ -551,7 +551,8 @@ This does NOT remove the Emacs package itself — use your package manager for t
 
 ;; ── Keymap ─────────────────────────────────────────────────────────
 
-(defvar better-eww-mode-map
+(defvar better-eww-mode-map nil "Keymap for `better-eww-mode'.")
+(setq better-eww-mode-map
   (let ((map (make-sparse-keymap)))
     ;; All printable characters → forward to browser.
     (dolist (c (number-sequence 32 126))
@@ -585,12 +586,11 @@ This does NOT remove the Emacs package itself — use your package manager for t
     (define-key map (kbd "C-c [") #'better-eww-prev-tab)
     (define-key map (kbd "C-c a") #'better-eww-list-tabs)
     (define-key map (kbd "C-c :") #'better-eww-execute-js)
-    map)
-  "Keymap for `better-eww-mode'.")
+    map))
 
 ;; ── Major mode ─────────────────────────────────────────────────────
 
-(define-derived-mode better-eww-mode special-mode "better-eww"
+(define-derived-mode better-eww-mode nil "better-eww"
   "Major mode for the better-eww browser buffer."
   :group 'better-eww
   (setq-local buffer-read-only t)
