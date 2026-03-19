@@ -133,3 +133,11 @@ Google actively detects and blocks automated/headless browsers. This is a Google
 - Use app passwords or sign into Google in a regular browser first, then export/import cookies
 - Sign in via a site that uses Google OAuth but is less strict about browser fingerprinting
 - Most other sites (Discord, Reddit, GitHub, etc.) work fine
+
+### Does audio/video work?
+
+**Video playback works** — at 30-60 FPS (`better-eww-fps`) it's perfectly watchable. YouTube may cut your stream if you're not logged in, but more freedom-respecting video sites work great.
+
+**Audio playback works** — headless Firefox routes audio through your system's PulseAudio/PipeWire, so video and music sites play sound normally.
+
+**Mic, camera, and screen sharing do not work.** The headless browser has no access to input devices, so voice/video calls and screen sharing are non-functional. This also means no site can secretly access your mic or camera.
