@@ -7,8 +7,24 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 FRAME_PATH = os.path.join(tempfile.gettempdir(), "better-eww-frame.jpg")
+SCRIPT_DIR = Path(__file__).resolve().parent
+BLOCKLIST_PATH = SCRIPT_DIR / "blocklist.txt"
+
+
+def load_blocklist():
+    """Load blocked domains from blocklist.txt into a set."""
+    if not BLOCKLIST_PATH.exists():
+        return set()
+    domains = set()
+    with open(BLOCKLIST_PATH) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                domains.add(line)
+    return domains
 
 
 async def main():
@@ -63,6 +79,24 @@ async def main():
                 viewport={"width": width, "height": height},
                 accept_downloads=False,
             )
+            # Ad blocking via request interception.
+            blocked = load_blocklist()
+            if blocked:
+                def is_blocked(host):
+                    """Check host and all parent domains against blocklist."""
+                    parts = host.split(".")
+                    for i in range(len(parts)):
+                        if ".".join(parts[i:]) in blocked:
+                            return True
+                    return False
+
+                async def block_ads(route):
+                    host = urlparse(route.request.url).hostname or ""
+                    if is_blocked(host):
+                        await route.abort()
+                    else:
+                        await route.continue_()
+                await context.route("**/*", block_ads)
             target_fps = params.get("fps", 30)
             page = context.pages[0] if context.pages else await context.new_page()
             loop_task = asyncio.create_task(screenshot_loop())

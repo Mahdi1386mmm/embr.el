@@ -119,6 +119,12 @@ Browser commands use the `C-c` prefix, keeping `C-x`, `M-x`, etc. free for Emacs
 
 Standard Emacs bookmarks work: `C-x r m` to save, `C-x r b` to jump.
 
+## Ad Blocking
+
+Built-in domain-level ad blocking using the [StevenBlack/hosts](https://github.com/StevenBlack/hosts) blocklist (~82K ad and tracker domains). Requests to blocked domains are intercepted and killed before they hit the network.
+
+The blocklist is downloaded automatically by `setup.sh` and refreshed every time you run `M-x better-eww-setup-or-update`. No extensions or extra configuration needed.
+
 ## How It Works
 
 Emacs spawns a Python subprocess (`better-eww.py`) that controls headless Firefox through Playwright. They communicate via JSON lines over stdin/stdout. The daemon streams JPEG screenshots at ~30 FPS via a temp file on disk, giving live visual feedback.

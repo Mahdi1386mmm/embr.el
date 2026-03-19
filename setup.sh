@@ -31,4 +31,14 @@ fi
 mv "$TMP_VENV" "$VENV_DIR"
 rm -rf ".venv.old"
 
+# Download ad/tracker blocklist.
+BLOCKLIST="blocklist.txt"
+echo "Downloading ad blocklist..."
+curl -sL "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts" \
+    | grep "^0\.0\.0\.0 " \
+    | awk '{print $2}' \
+    | sort -u > "$BLOCKLIST.tmp"
+mv "$BLOCKLIST.tmp" "$BLOCKLIST"
+echo "Blocklist: $(wc -l < "$BLOCKLIST") domains"
+
 echo "Setup complete. Firefox and Playwright are ready."
