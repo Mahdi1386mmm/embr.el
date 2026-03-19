@@ -525,6 +525,8 @@ This does NOT remove the Emacs package itself — use your package manager for t
     ("TAB" "Tab")
     ("DEL" "Backspace")
     ("SPC" " ")
+    ("C-v" "PageDown")
+    ("M-v" "PageUp")
     ("<backspace>" "Backspace")
     ("<return>" "Enter")
     ("<tab>" "Tab")
@@ -564,6 +566,10 @@ This does NOT remove the Emacs package itself — use your package manager for t
                    "<home>" "<end>" "<up>" "<down>" "<left>" "<right>"
                    "<prior>" "<next>" "<escape>"))
       (define-key map (kbd key) #'better-eww-self-insert))
+
+    ;; Emacs scroll keys → browser page up/down.
+    (define-key map (kbd "C-v") #'better-eww-self-insert)
+    (define-key map (kbd "M-v") #'better-eww-self-insert)
 
     ;; Mouse → forward to browser.
     (define-key map [mouse-1] #'better-eww-click)

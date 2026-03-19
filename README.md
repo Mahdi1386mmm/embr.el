@@ -91,9 +91,19 @@ M-x better-eww-browse RET https://example.com RET
 
 ## Keybindings
 
-All keys are forwarded directly to the browser. Typing, arrows, backspace, tab, and enter work as expected.
+All keys are forwarded directly to the browser. Typing, arrows, backspace, tab, and enter work as expected. `C-x`, `M-x`, etc. stay free for Emacs.
 
-Browser commands use the `C-c` prefix, keeping `C-x`, `M-x`, etc. free for Emacs.
+| Key | Action |
+|-----|--------|
+| `C-v` | Page down |
+| `M-v` | Page up |
+| `C-x` | Emacs prefix (not forwarded) |
+| `M-x` | Emacs command (not forwarded) |
+| `C-c` | Browser command prefix (see below) |
+
+### Browser commands
+
+Browser commands use the `C-c` prefix.
 
 | Key | Action |
 |-----|--------|
