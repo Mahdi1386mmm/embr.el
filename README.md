@@ -184,7 +184,7 @@ Browser sessions persist across restarts. Cookies and login state are stored in 
 
 ![Google sign-in blocked](assets/google-sign-in-blocked.png)
 
-Google detects and blocks automated/headless browsers. This is a Google-side restriction, not a bug. Most other sites (Discord, Reddit, GitHub, etc.) work fine.
+Google detects and blocks automated/headless browsers. This is a Google-side restriction, not a bug.
 
 ### Does audio/video work?
 
