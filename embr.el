@@ -58,9 +58,13 @@ alongside the .el in the builds dir, so this just works.")
   "Target frames per second for the screenshot stream."
   :type 'integer)
 
-(defcustom embr-external-player "mpv"
-  "External media player for `embr-play-external'.
-The current URL is piped through yt-dlp and into this player."
+(defcustom embr-external-command "yt-dlp -o - %s | mpv -"
+  "Shell command for `embr-play-external'.
+%s is replaced with the current page URL (shell-quoted).
+Examples:
+  \"yt-dlp -o - %s | mpv -\"     — stream via yt-dlp into mpv (default)
+  \"mpv %s\"                      — open directly in mpv
+  \"chromium %s\"                 — open in Chromium"
   :type 'string)
 
 (defcustom embr-click-method 'default
@@ -586,17 +590,14 @@ Better compatibility with iframe widgets like Cloudflare Turnstile."
 ;; ── External player ───────────────────────────────────────────────
 
 (defun embr-play-external ()
-  "Play the current URL with yt-dlp piped to `embr-external-player'."
+  "Run `embr-external-command' with the current page URL."
   (interactive)
   (let ((url embr--current-url))
     (if (string-empty-p url)
         (message "embr: no URL to play")
-      (message "Playing in %s: %s" embr-external-player url)
-      (start-process-shell-command
-       "embr-player" nil
-       (format "yt-dlp -o - %s | %s -"
-               (shell-quote-argument url)
-               embr-external-player)))))
+      (let ((cmd (format embr-external-command (shell-quote-argument url))))
+        (message "Running: %s" cmd)
+        (start-process-shell-command "embr-player" nil cmd)))))
 
 ;; ── Find in page ───────────────────────────────────────────────────
 

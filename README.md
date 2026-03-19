@@ -31,7 +31,7 @@ Emacs is the display server. Headless Firefox is the renderer.
         embr-search-engine 'brave       ; 'brave, 'google, 'duckduckgo, or custom URL with %s
         embr-click-method 'default      ; 'default or 'atomic (see Configuration below)
         embr-scroll-method 'default     ; 'default or 'smooth (see Configuration below)
-        embr-external-player "mpv"))    ; Media player for & key (receives yt-dlp output via pipe)
+        embr-external-command "yt-dlp -o - %s | mpv -")) ; Shell command for & key (%s = URL)
 ```
 
 </td>
@@ -50,7 +50,7 @@ Emacs is the display server. Headless Firefox is the renderer.
         embr-search-engine 'brave       ; 'brave, 'google, 'duckduckgo, or custom URL with %s
         embr-click-method 'default      ; 'default or 'atomic (see Configuration below)
         embr-scroll-method 'default     ; 'default or 'smooth (see Configuration below)
-        embr-external-player "mpv"))    ; Media player for & key (receives yt-dlp output via pipe)
+        embr-external-command "yt-dlp -o - %s | mpv -")) ; Shell command for & key (%s = URL)
 ```
 
 </td>
@@ -95,7 +95,7 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-search-engine` | `'brave` | `'brave`, `'google`, `'duckduckgo`, or custom URL with `%s` |
 | `embr-click-method` | `'default` | Click dispatch method (see below) |
 | `embr-scroll-method` | `'default` | Scroll behavior (see below) |
-| `embr-external-player` | `"mpv"` | Media player for `&` key (receives yt-dlp output via pipe) |
+| `embr-external-command` | `"yt-dlp -o - %s \| mpv -"` | Shell command for `&` key (`%s` = URL). e.g. `"mpv %s"`, `"chromium %s"` |
 
 ### Click methods
 
@@ -139,7 +139,7 @@ All keys are forwarded directly to the browser. Typing, arrows, backspace, tab, 
 | `C-r` | Search backward (isearch-style) |
 | `C-v` | Page down |
 | `M-v` | Page up |
-| `&` | Play URL with yt-dlp + mpv (like eww's `&`) |
+| `&` | Run `embr-external-command` on current URL (default: yt-dlp + mpv) |
 | `F5` | Refresh page |
 | `F8` | Cycle viewport: iPhone → 720p → 1080p (Emacs handles up to 1080p well, higher loses perf) |
 | `C-x` | Emacs prefix (not forwarded) |
