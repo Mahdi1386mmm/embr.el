@@ -203,6 +203,18 @@ Google detects and blocks automated/headless browsers. This is a Google-side res
 
 Cloudflare Turnstile detects and blocks headless/automated browsers. The checkbox will not respond regardless of click method. This is a Cloudflare-side restriction, not a bug.
 
+### Fullscreen video
+
+YouTube fullscreen works thanks to `embr-fullscreen-hack` (enabled by default), which intercepts the Fullscreen API and fakes it with CSS fixed positioning. YouTube without being logged in can still be uncooperative — throttling, interruptions, etc.
+
+**Odysee, Rumble, Bitchute** and similar sites use CSS-based "fullscreen" (Video.js fullwindow mode) instead of the real Fullscreen API, so the hack can't intercept it. Their fullscreen is currently broken — the video overflows the viewport. If you figure out a fix, PRs welcome.
+
+**Recommended workaround:** Press `&` to play any video through yt-dlp + mpv. This gives native fullscreen, better quality, and no headless browser detection. If the site requires login cookies, set your external command to:
+
+```elisp
+(setq embr-external-command "yt-dlp --cookies-from-browser firefox -o - %s | mpv -")
+```
+
 ### Does audio/video work?
 
 **Video playback works.** Frame rate depends on `embr-fps` (default 30). YouTube may throttle unauthenticated sessions.
