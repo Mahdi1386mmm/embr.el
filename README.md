@@ -1,3 +1,23 @@
+## TODOs - PERFORMANCE
+
+PLAN-1 (PLAN.md)
+Builds the baseline responsiveness system: input-first scheduling, adaptive capture behavior, hover shedding, and measurable perf reporting. It improves interaction latency consistency and reduces freeze events while establishing objective pass/fail gates.
+
+PLAN-2 (PLAN-2.md)
+Adds a C-based embr-booster transport layer to prioritize control/input traffic over frame churn with bounded queues and backpressure policy. It improves responsiveness under load by reducing pipe contention and head-of-line blocking.
+
+PLAN-3 (PLAN-3.md)
+Moves beyond transport tuning into payload/render architecture: partial updates, binary channel, shared-memory path, and Emacs render optimization. It improves FPS and freshness by reducing full-frame bandwidth and stale-frame decode work.
+
+PLAN-4 (PLAN-4.md)
+Pushes the no-Emacs-patch performance ceiling with copy elimination, jitter control, optional module acceleration, and strict replay benchmarking. It targets tighter p95/p99 latency and higher sustained FPS without requiring an Emacs fork.
+
+PLAN-5 (PLAN-5.md)
+Introduces Camoufox profile tuning (strict vs balanced) focused on recovering speed while keeping uBO on, images on, and non-virtual headless mode. It improves startup/navigation/revisit performance through runtime pref tuning and optional geoip install cleanup.
+
+PLAN-6 (PLAN-6.md)
+Implements the full aggressive profile in one bundled pass, then validates once against strict and balanced. It is an aggressive stealth/compatibility tradeoff profile designed to maximize performance via runtime tuning, with explicit rollback if site-friction outcomes are unacceptable.
+
 ## embr.el
 **Em**acs **Br**owser
 
@@ -245,4 +265,3 @@ No plans to add this upstream, but PRs are welcome. If you implement it, gate it
 ### Does this work on macOS?
 
 Unknown. Let us know.
-
