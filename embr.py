@@ -6,12 +6,54 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 FRAME_PATH = os.path.join(tempfile.gettempdir(), "embr-frame.jpg")
+PERF_LOG_PATH = os.path.join(tempfile.gettempdir(), "embr-perf.jsonl")
 SCRIPT_DIR = Path(__file__).resolve().parent
 BLOCKLIST_PATH = SCRIPT_DIR / "blocklist.txt"
+
+
+class PerfLog:
+    """Lightweight JSONL performance logger.  No-op when disabled."""
+
+    INTERACTIVE_CMDS = {
+        "mousemove", "click", "mousedown", "mouseup", "key", "type", "scroll",
+    }
+
+    def __init__(self):
+        self.enabled = False
+        self.cmd_id = 0
+        self.frame_id = 0
+        self.last_frame_emit_ts = None
+        self.last_interactive_input_ts = None
+        self._file = None
+
+    def enable(self):
+        self.enabled = True
+        self._file = open(PERF_LOG_PATH, "w", buffering=1)
+
+    def log(self, event, **fields):
+        if not self.enabled:
+            return
+        fields["event"] = event
+        fields["ts_ms"] = round(time.monotonic() * 1000, 2)
+        self._file.write(json.dumps(fields) + "\n")
+
+    def next_cmd_id(self):
+        self.cmd_id += 1
+        return self.cmd_id
+
+    def next_frame_id(self):
+        self.frame_id += 1
+        return self.frame_id
+
+    def close(self):
+        if self._file:
+            self._file.close()
+            self._file = None
 
 
 def load_blocklist():
@@ -32,6 +74,7 @@ async def main():
     from camoufox.async_api import AsyncNewBrowser
     from browserforge.fingerprints import Screen
     pw = await async_playwright().start()
+    perf = PerfLog()
     context = None
     page = None
     loop_task = None
@@ -40,6 +83,22 @@ async def main():
     jpeg_quality = 80
     cached_title = ""
     frame_count = 0
+
+    # Input-priority scheduler state.
+    input_priority_until = 0.0      # monotonic ts — capture suppressed until this
+    mode = "watch"                  # "interactive" or "watch"
+    input_priority_window_s = 0.125 # from init params (default 125ms)
+
+    # Adaptive capture controller state.
+    adaptive_enabled = False
+    fps_min = 12
+    fps_max = 30          # set to user-configured ceiling at init
+    quality_min = 45
+    quality_max = 80      # set to user-configured ceiling at init
+    capture_ema = 0.0
+    stable_frames = 0
+    adapt_cooldown = 0
+    last_rendered_frame_id = 0
 
     user_data_dir = Path.home() / ".local" / "share" / "embr" / "firefox-profile"
     user_data_dir.mkdir(parents=True, exist_ok=True)
@@ -50,8 +109,18 @@ async def main():
 
     async def write_frame():
         """Take a JPEG screenshot, write atomically to disk, notify Emacs."""
-        nonlocal cached_title, frame_count
+        nonlocal cached_title, frame_count, capture_ema
+        fid = perf.next_frame_id()
+        t0 = time.monotonic()
+        perf.log("capture_start", frame_id=fid)
         jpg_bytes = await page.screenshot(type="jpeg", quality=jpeg_quality)
+        t_capture_done = time.monotonic()
+        capture_ms = round((t_capture_done - t0) * 1000, 2)
+        perf.log("capture_done", frame_id=fid, capture_ms=capture_ms,
+                 bytes=len(jpg_bytes))
+        # Update capture EMA for adaptive controller.
+        alpha = 0.2
+        capture_ema = alpha * capture_ms + (1 - alpha) * capture_ema
         tmp = FRAME_PATH + ".tmp"
         with open(tmp, "wb") as f:
             f.write(jpg_bytes)
@@ -59,17 +128,98 @@ async def main():
         frame_count += 1
         if frame_count % 15 == 0:
             cached_title = await page.title()
-        emit({"frame": True, "title": cached_title, "url": page.url})
+        capture_done_mono_ms = round(t_capture_done * 1000, 2)
+        emit({"frame": True, "title": cached_title, "url": page.url,
+              "pressure": mode == "interactive" or target_fps < fps_max,
+              "frame_id": fid, "capture_done_mono_ms": capture_done_mono_ms})
+        now = time.monotonic()
+        emit_fields = dict(frame_id=fid, fps_target=target_fps,
+                           jpeg_quality=jpeg_quality, mode=mode,
+                           fps_effective=round(1000 / max(1, capture_ms), 1))
+        if perf.last_frame_emit_ts is not None:
+            emit_fields["interval_ms"] = round(
+                (now - perf.last_frame_emit_ts) * 1000, 2)
+        if perf.last_interactive_input_ts is not None:
+            emit_fields["input_to_frame_ms"] = round(
+                (now - perf.last_interactive_input_ts) * 1000, 2)
+            perf.last_interactive_input_ts = None
+        perf.log("frame_emit", **emit_fields)
+        perf.last_frame_emit_ts = now
 
     async def screenshot_loop():
         """Continuously capture frames at target FPS."""
+        nonlocal mode, input_priority_until, stable_frames, adapt_cooldown
+        nonlocal target_fps, jpeg_quality
+        in_priority_window = False
         while running:
             if page is not None:
+                # Input-priority: suppress capture during the window.
+                now = time.monotonic()
+                if now < input_priority_until:
+                    in_priority_window = True
+                    perf.log("frame_drop", reason="input_priority",
+                             frame_id=perf.frame_id + 1)
+                    await asyncio.sleep(0.01)
+                    continue
+                if in_priority_window:
+                    in_priority_window = False
+                    perf.log("input_priority_end")
+                if mode != "watch":
+                    old = mode
+                    mode = "watch"
+                    perf.log("mode_change", old_mode=old, new_mode="watch")
+
                 start = asyncio.get_event_loop().time()
                 try:
                     await write_frame()
                 except Exception as e:
                     print(f"embr: screenshot error: {e}", file=sys.stderr)
+
+                # Adaptive capture controller.
+                if adaptive_enabled:
+                    if adapt_cooldown > 0:
+                        adapt_cooldown -= 1
+                    else:
+                        frame_budget_ms = 1000 / target_fps
+                        if capture_ema > frame_budget_ms * 0.7:
+                            # Step down — reduce pressure.
+                            old_fps, old_q = target_fps, jpeg_quality
+                            if target_fps > fps_min:
+                                target_fps = max(fps_min, target_fps - 2)
+                            elif jpeg_quality > quality_min:
+                                jpeg_quality = max(quality_min,
+                                                   jpeg_quality - 5)
+                            if (target_fps, jpeg_quality) != (old_fps, old_q):
+                                perf.log("adapt_step", direction="down",
+                                         fps=target_fps,
+                                         jpeg_quality=jpeg_quality,
+                                         capture_ema_ms=round(capture_ema, 1),
+                                         reason="budget_overrun")
+                                adapt_cooldown = 30
+                                stable_frames = 0
+                        elif capture_ema < frame_budget_ms * 0.5:
+                            stable_frames += 1
+                            if stable_frames >= 60:
+                                # Step up — recover.
+                                old_fps, old_q = target_fps, jpeg_quality
+                                if jpeg_quality < quality_max:
+                                    jpeg_quality = min(quality_max,
+                                                       jpeg_quality + 5)
+                                elif target_fps < fps_max:
+                                    target_fps = min(fps_max, target_fps + 1)
+                                if (target_fps, jpeg_quality) != (old_fps,
+                                                                  old_q):
+                                    perf.log("adapt_step", direction="up",
+                                             fps=target_fps,
+                                             jpeg_quality=jpeg_quality,
+                                             capture_ema_ms=round(
+                                                 capture_ema, 1),
+                                             reason="stable")
+                                    adapt_cooldown = 60
+                                    stable_frames = 0
+                        else:
+                            stable_frames = 0
+
                 elapsed = asyncio.get_event_loop().time() - start
                 await asyncio.sleep(max(0, (1 / target_fps) - elapsed))
             else:
@@ -103,8 +253,12 @@ async def main():
 
     async def handle(cmd, params):
         nonlocal context, page, running, loop_task, target_fps, jpeg_quality, cached_title
+        nonlocal input_priority_window_s
+        nonlocal adaptive_enabled, fps_min, fps_max, quality_min, quality_max
 
         if cmd == "init":
+            if params.get("perf_log"):
+                perf.enable()
             width = params.get("width", 1280)
             height = params.get("height", 720)
             sw = params.get("screen_width", 1920)
@@ -230,6 +384,18 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
 
             target_fps = params.get("fps", 60)
             jpeg_quality = params.get("jpeg_quality", 80)
+
+            # Input-priority scheduler params.
+            input_priority_window_s = params.get(
+                "input_priority_window_ms", 125) / 1000.0
+
+            # Adaptive capture controller params.
+            adaptive_enabled = bool(params.get("adaptive_capture", False))
+            fps_min = params.get("adaptive_fps_min", 12)
+            fps_max = target_fps
+            quality_min = params.get("adaptive_jpeg_quality_min", 45)
+            quality_max = jpeg_quality
+
             page = context.pages[0] if context.pages else await context.new_page()
             if dom_caret:
                 try:
@@ -258,6 +424,9 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
         # Mousemove: fire-and-forget CDP (isTrusted=true for CSS :hover).
         # Cancel-and-replace — each new move cancels the previous.
         if cmd == "mousemove":
+            # Drop hover during input-priority window.
+            if time.monotonic() < input_priority_until:
+                return {"ok": True}
             nonlocal mouse_move_task
             if mouse_move_task and not mouse_move_task.done():
                 mouse_move_task.cancel()
@@ -268,6 +437,22 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
                     pass
             mouse_move_task = asyncio.create_task(
                 _move(params.get("x", 0), params.get("y", 0)))
+            return {"ok": True}
+
+        # Frame rendered ack from Emacs — logs true staleness at render time.
+        # Emacs echoes capture_done_mono_ms (daemon monotonic) back so we
+        # compute staleness entirely within the daemon's monotonic clock.
+        if cmd == "frame_rendered":
+            nonlocal last_rendered_frame_id
+            fid = params.get("frame_id", 0)
+            capture_mono = params.get("capture_done_mono_ms", 0)
+            now_mono_ms = round(time.monotonic() * 1000, 2)
+            staleness = round(now_mono_ms - capture_mono, 2) if capture_mono else 0
+            skipped = max(0, fid - last_rendered_frame_id - 1)
+            perf.log("frame_render", frame_id=fid,
+                     frame_staleness_ms=staleness,
+                     frames_skipped=skipped)
+            last_rendered_frame_id = fid
             return {"ok": True}
 
         # Click: JS evaluate (Runtime domain, no CDP pipe contention).
@@ -443,6 +628,7 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
             if context:
                 await context.close()
             await pw.stop()
+            perf.close()
             try:
                 os.unlink(FRAME_PATH)
             except OSError:
@@ -494,6 +680,22 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
         for msg in commands:
             cmd = msg.get("cmd", "")
             params = {k: v for k, v in msg.items() if k != "cmd"}
+            cid = perf.next_cmd_id()
+            perf.log("cmd_receive", cmd=cmd, cmd_id=cid)
+            if cmd in PerfLog.INTERACTIVE_CMDS:
+                perf.last_interactive_input_ts = time.monotonic()
+                # mousemove is passive hover tracking — it should not
+                # extend the input-priority window or it would starve
+                # frame capture for the entire duration of pointer movement.
+                if cmd != "mousemove":
+                    input_priority_until = time.monotonic() + input_priority_window_s
+                    perf.log("input_priority_start", cmd=cmd,
+                             window_ms=round(input_priority_window_s * 1000, 1))
+                if mode != "interactive":
+                    old = mode
+                    mode = "interactive"
+                    perf.log("mode_change", old_mode=old, new_mode="interactive")
+            t0 = time.monotonic()
             try:
                 resp = await asyncio.wait_for(handle(cmd, params), timeout=35)
             except asyncio.TimeoutError:
@@ -504,6 +706,8 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
                 should_exit = True
                 break
             emit(resp)
+            latency_ms = round((time.monotonic() - t0) * 1000, 2)
+            perf.log("cmd_ack", cmd=cmd, cmd_id=cid, latency_ms=latency_ms)
         if should_exit:
             break
 

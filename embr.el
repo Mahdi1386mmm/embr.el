@@ -137,6 +137,44 @@ string with %s for the query."
                  (const :tag "DuckDuckGo" duckduckgo)
                  (string :tag "Custom URL (use %s for query)")))
 
+(defcustom embr-perf-log nil
+  "Whether to enable performance logging in the daemon.
+When non-nil, the daemon writes JSONL performance events to
+/tmp/embr-perf.jsonl for analysis with tools/embr-perf-report.py."
+  :type 'boolean)
+
+(defcustom embr-input-priority-window-ms 125
+  "Milliseconds to suppress frame capture after interactive input.
+During this window the daemon drops screenshot captures so the CDP
+pipe is free for input commands.  Set to 0 to disable."
+  :type 'integer)
+
+(defcustom embr-adaptive-capture t
+  "Whether the daemon should auto-tune FPS and JPEG quality.
+When non-nil, the daemon lowers FPS and quality when capture time
+exceeds the frame budget, and recovers when headroom returns."
+  :type 'boolean)
+
+(defcustom embr-adaptive-fps-min 12
+  "Minimum FPS the adaptive controller will step down to."
+  :type 'integer)
+
+(defcustom embr-adaptive-jpeg-quality-min 45
+  "Minimum JPEG quality the adaptive controller will step down to."
+  :type 'integer)
+
+(defcustom embr-hover-move-threshold-px 2
+  "Minimum pixel distance before sending a hover update.
+Filters out sub-pixel jitter.  Higher values reduce CDP traffic
+at the cost of hover precision."
+  :type 'integer)
+
+(defcustom embr-hover-rate-min 2
+  "Minimum hover rate in Hz when the daemon signals load pressure.
+The hover timer runs at `embr-hover-rate' normally, but self-throttles
+to this rate when the daemon is under input pressure."
+  :type 'integer)
+
 (defun embr--search-url (query)
   "Build a search URL for QUERY using `embr-search-engine'."
   (let ((template (pcase embr-search-engine
@@ -245,6 +283,8 @@ This does NOT remove the Emacs package itself — use your package manager for t
 (defvar embr--hover-last-y nil "Last hover Y coordinate sent.")
 (defvar embr--pending-frame nil "Latest frame response waiting to be rendered.")
 (defvar embr--render-timer nil "Timer that renders pending frames at a capped rate.")
+(defvar embr--pressure nil "Non-nil when daemon signals load pressure.")
+(defvar embr--hover-last-send-time nil "Float-time of last hover send.")
 
 ;; ── Process management ─────────────────────────────────────────────
 
@@ -308,6 +348,8 @@ This does NOT remove the Emacs package itself — use your package manager for t
   "Send MSG (an alist) to the daemon as JSON.  Call CALLBACK with the response."
   (unless (and embr--process (process-live-p embr--process))
     (error "embr: daemon not running"))
+  ;; Purge any stale pending frame so the next render reflects post-input state.
+  (setq embr--pending-frame nil)
   (setq embr--callback callback)
   (process-send-string embr--process (concat (json-serialize msg) "\n")))
 
@@ -325,8 +367,11 @@ This does NOT remove the Emacs package itself — use your package manager for t
 
 (defun embr--handle-frame (resp)
   "Read the JPEG frame from disk and display it.  Update title/url from RESP."
+  (setq embr--pressure (eq (alist-get 'pressure resp) t))
   (let ((title (or (alist-get 'title resp) ""))
-        (url (or (alist-get 'url resp) "")))
+        (url (or (alist-get 'url resp) ""))
+        (frame-id (alist-get 'frame_id resp))
+        (capture-mono (alist-get 'capture_done_mono_ms resp)))
     (when (and embr--frame-path
                (file-exists-p embr--frame-path)
                (buffer-live-p embr--buffer))
@@ -350,6 +395,19 @@ This does NOT remove the Emacs package itself — use your package manager for t
             (rename-buffer (format "*embr: %s*"
                                    (if (string-empty-p title) url title))
                            t))))
+      ;; Send render ack so the daemon can measure true staleness.
+      ;; Echoes capture_done_mono_ms (daemon monotonic clock) back so
+      ;; staleness is computed entirely within the daemon's monotonic
+      ;; clock — no wall-clock subtraction across processes.
+      (when (and embr-perf-log frame-id capture-mono
+                 embr--process (process-live-p embr--process))
+        (process-send-string
+         embr--process
+         (concat (json-serialize
+                  `((cmd . "frame_rendered")
+                    (frame_id . ,frame-id)
+                    (capture_done_mono_ms . ,capture-mono)))
+                 "\n")))
       (setq embr--current-title title
             embr--current-url url))))
 
@@ -549,16 +607,26 @@ Better compatibility with iframe widgets like Cloudflare Turnstile."
             (setq img-x (max 0 (min img-x (1- (or embr--viewport-width embr-default-width))))))
           (when img-y
             (setq img-y (max 0 (min img-y (1- (or embr--viewport-height embr-default-height))))))
-          (when (and img-x img-y
-                     (not (and (eql img-x embr--hover-last-x)
-                               (eql img-y embr--hover-last-y))))
-            (setq embr--hover-last-x img-x
-                  embr--hover-last-y img-y)
-            ;; Write directly to process — don't touch embr--callback.
-            ;; Using embr--send here would clobber any pending command callback.
-            (process-send-string
-             embr--process
-             (concat (json-serialize `((cmd . "mousemove") (x . ,img-x) (y . ,img-y))) "\n"))))))))
+          ;; Distance threshold: filter sub-pixel jitter.
+          (let* ((dx (- img-x (or embr--hover-last-x img-x)))
+                 (dy (- img-y (or embr--hover-last-y img-y)))
+                 (dist (sqrt (+ (* dx dx) (* dy dy))))
+                 ;; Rate self-throttle: use min rate under pressure.
+                 (rate (if embr--pressure embr-hover-rate-min embr-hover-rate))
+                 (min-interval (/ 1.0 rate))
+                 (now (float-time)))
+            (when (and img-x img-y
+                       (>= dist embr-hover-move-threshold-px)
+                       (or (null embr--hover-last-send-time)
+                           (>= (- now embr--hover-last-send-time) min-interval)))
+              (setq embr--hover-last-x img-x
+                    embr--hover-last-y img-y
+                    embr--hover-last-send-time now)
+              ;; Write directly to process — don't touch embr--callback.
+              ;; Using embr--send here would clobber any pending command callback.
+              (process-send-string
+               embr--process
+               (concat (json-serialize `((cmd . "mousemove") (x . ,img-x) (y . ,img-y))) "\n")))))))))
 
 
 (defun embr--hover-start ()
@@ -572,7 +640,9 @@ Better compatibility with iframe widgets like Cloudflare Turnstile."
     (cancel-timer embr--hover-timer)
     (setq embr--hover-timer nil
           embr--hover-last-x nil
-          embr--hover-last-y nil)))
+          embr--hover-last-y nil
+          embr--hover-last-send-time nil
+          embr--pressure nil)))
 
 
 ;; ── Render timer ──────────────────────────────────────────────────
@@ -996,7 +1066,14 @@ If the daemon is already running, just navigate to the new URL."
                    ,@(when embr-color-scheme
                        `((color_scheme . ,(symbol-name embr-color-scheme))))
                    ,@(when embr-dom-caret-hack
-                       '((dom_caret . t)))))))
+                       '((dom_caret . t)))
+                   ,@(when embr-perf-log
+                       '((perf_log . t)))
+                   (input_priority_window_ms . ,embr-input-priority-window-ms)
+                   ,@(when embr-adaptive-capture
+                       `((adaptive_capture . t)
+                         (adaptive_fps_min . ,embr-adaptive-fps-min)
+                         (adaptive_jpeg_quality_min . ,embr-adaptive-jpeg-quality-min)))))))
 
       (if (alist-get 'error resp)
           (error "embr: init failed: %s" (alist-get 'error resp))

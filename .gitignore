@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 *.elc
 blocklist.txt
+reports/
