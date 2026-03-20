@@ -157,22 +157,6 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-background-timeout` | integer | `30` | Seconds of no input before entering background capture mode (1 FPS, min quality). |
 | `embr-shm-transport` | boolean | `t` | Use shared memory for frame transport on Linux. Falls back to disk if unavailable. |
 
-### New in this version
-
-The following variables were added for the rendering and transport overhaul. They work with safe defaults and require no action on upgrade:
-
-- `embr-idle-timeout` — seconds before idle capture mode (default 5s, captures at 5 FPS)
-- `embr-background-timeout` — seconds before background capture mode (default 30s, captures at 1 FPS)
-- `embr-shm-transport` — shared memory frame transport on Linux (default on, falls back to disk)
-- `embr-input-priority-window-ms` — suppresses frame capture briefly after input (default 35ms, 0 to disable)
-- `embr-adaptive-capture` — auto-tunes FPS/quality under load (default on)
-- `embr-adaptive-fps-min`, `embr-adaptive-jpeg-quality-min` — floors for the adaptive controller (40 FPS, quality 65)
-- `embr-hover-move-threshold-px` — filters sub-pixel hover jitter (default 0px)
-- `embr-hover-rate-min` — hover self-throttle floor under pressure (default 14 Hz)
-- `embr-perf-log` — enables JSONL performance logging for diagnostics (default off)
-- `embr-booster` — enables the optional C transport proxy for lower latency under load (default off)
-- `embr-booster-path`, `embr-booster-args` — path and extra CLI args for the booster binary
-
 ## Usage
 
 ```
