@@ -19,7 +19,7 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
   :defer t
   :ensure (:host github
            :repo "emacs-os/embr.el"
-           :files ("*.el" "*.py" "*.sh" "libexec/"))
+           :files ("*.el" "*.py" "*.sh"))
   :config
   (setq embr-python "~/.local/share/embr/.venv/bin/python" ;; auto-detected
         embr-script (expand-file-name "embr.py" embr--directory) ;; auto-detected
@@ -43,10 +43,7 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
         embr-adaptive-jpeg-quality-min 65
         embr-hover-move-threshold-px 0
         embr-hover-rate-min 14
-        embr-external-command "yt-dlp -o - %s | mpv -"
-        embr-booster nil
-        embr-booster-path (expand-file-name "embr-booster" embr--data-dir)
-        embr-booster-args nil))
+        embr-external-command "yt-dlp -o - %s | mpv -"))
 ```
 
 **straight.el**
@@ -56,7 +53,7 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
   :defer t
   :straight (:host github
              :repo "emacs-os/embr.el"
-             :files ("*.el" "*.py" "*.sh" "libexec/"))
+             :files ("*.el" "*.py" "*.sh"))
   :config
   (setq embr-python "~/.local/share/embr/.venv/bin/python" ;; auto-detected
         embr-script (expand-file-name "embr.py" embr--directory) ;; auto-detected
@@ -80,10 +77,7 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
         embr-adaptive-jpeg-quality-min 65
         embr-hover-move-threshold-px 0
         embr-hover-rate-min 14
-        embr-external-command "yt-dlp -o - %s | mpv -"
-        embr-booster nil
-        embr-booster-path (expand-file-name "embr-booster" embr--data-dir)
-        embr-booster-args nil))
+        embr-external-command "yt-dlp -o - %s | mpv -"))
 ```
 
 **Tip:** Make embr your default Emacs browser and enable clickable URLs everywhere:
