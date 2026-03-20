@@ -36,7 +36,8 @@ async def main():
     page = None
     loop_task = None
     running = True
-    target_fps = 60
+    target_fps = 30
+    jpeg_quality = 80
     cached_title = ""
     frame_count = 0
 
@@ -50,7 +51,7 @@ async def main():
     async def write_frame():
         """Take a JPEG screenshot, write atomically to disk, notify Emacs."""
         nonlocal cached_title, frame_count
-        jpg_bytes = await page.screenshot(type="jpeg", quality=80)
+        jpg_bytes = await page.screenshot(type="jpeg", quality=jpeg_quality)
         tmp = FRAME_PATH + ".tmp"
         with open(tmp, "wb") as f:
             f.write(jpg_bytes)
@@ -101,7 +102,7 @@ async def main():
     }"""
 
     async def handle(cmd, params):
-        nonlocal context, page, running, loop_task, target_fps, cached_title
+        nonlocal context, page, running, loop_task, target_fps, jpeg_quality, cached_title
 
         if cmd == "init":
             width = params.get("width", 1280)
@@ -139,6 +140,7 @@ async def main():
                         await route.continue_()
                 await context.route("**/*", block_ads)
             target_fps = params.get("fps", 60)
+            jpeg_quality = params.get("jpeg_quality", 80)
             page = context.pages[0] if context.pages else await context.new_page()
             # Force our exact viewport size (camoufox may derive a different one from its fingerprint).
             await page.set_viewport_size({"width": width, "height": height})
@@ -174,19 +176,31 @@ async def main():
                 _move(params.get("x", 0), params.get("y", 0)))
             return {"ok": True}
 
-        # Click/mousedown/mouseup: JS evaluate (Runtime domain, never
-        # contends with screenshot traffic on the CDP pipe).
+        # Click: JS evaluate (Runtime domain, no CDP pipe contention).
         if cmd == "click":
             asyncio.create_task(
                 page.evaluate(_CLICK_JS, [params["x"], params["y"]]))
             return {"ok": True}
+        # Mousedown/mouseup: CDP (isTrusted=true, needed for native text
+        # selection).  Fire-and-forget — infrequent (one per drag) so they
+        # find gaps in the pipe like keyboard events.
         if cmd == "mousedown":
-            asyncio.create_task(
-                page.evaluate(_MOUSE_JS, ["mousedown", params["x"], params["y"]]))
+            async def _down(x, y):
+                try:
+                    await page.mouse.move(x, y)
+                    await page.mouse.down()
+                except Exception:
+                    pass
+            asyncio.create_task(_down(params["x"], params["y"]))
             return {"ok": True}
         if cmd == "mouseup":
-            asyncio.create_task(
-                page.evaluate(_MOUSE_JS, ["mouseup", params["x"], params["y"]]))
+            async def _up(x, y):
+                try:
+                    await page.mouse.move(x, y)
+                    await page.mouse.up()
+                except Exception:
+                    pass
+            asyncio.create_task(_up(params["x"], params["y"]))
             return {"ok": True}
 
         # Keyboard and scroll are also fire-and-forget: these are

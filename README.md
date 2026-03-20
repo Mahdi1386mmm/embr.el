@@ -21,14 +21,17 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
            :repo "emacs-os/embr.el"
            :files ("*.el" "*.py" "*.sh"))
   :config
-  (setq embr-fps 60
+  (setq embr-fps 30
+        embr-jpeg-quality 80
+        embr-hover-rate 8
         embr-default-width 1280
         embr-default-height 720
         embr-screen-width 1920
         embr-screen-height 1080
         embr-search-engine 'google
         embr-click-method 'atomic
-        embr-scroll-method 'smooth
+        embr-scroll-method 'instant
+        embr-scroll-step 100
         embr-external-command "yt-dlp -o - %s | mpv -"))
 ```
 
@@ -41,14 +44,17 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
              :repo "emacs-os/embr.el"
              :files ("*.el" "*.py" "*.sh"))
   :config
-  (setq embr-fps 60
+  (setq embr-fps 30
+        embr-jpeg-quality 80
+        embr-hover-rate 8
         embr-default-width 1280
         embr-default-height 720
         embr-screen-width 1920
         embr-screen-height 1080
         embr-search-engine 'google
         embr-click-method 'atomic
-        embr-scroll-method 'smooth
+        embr-scroll-method 'instant
+        embr-scroll-step 100
         embr-external-command "yt-dlp -o - %s | mpv -"))
 ```
 
@@ -91,14 +97,17 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `embr-fps` | integer | `60` | Target frames per second (try 30 if your machine struggles) |
+| `embr-fps` | integer | `30` | Target frames per second |
+| `embr-jpeg-quality` | integer | `80` | JPEG quality (1-100). Lower = smaller frames, less CDP contention, worse image. 50 halves frame size. |
+| `embr-hover-rate` | integer | `8` | Mouse hover tracking rate in Hz. Lower = better click reliability during video, less responsive hover. |
 | `embr-default-width` | integer | `1280` | Viewport width in pixels |
 | `embr-default-height` | integer | `720` | Viewport height in pixels |
 | `embr-screen-width` | integer | `1920` | Screen width reported to websites (should be >= viewport) |
 | `embr-screen-height` | integer | `1080` | Screen height reported to websites (should be >= viewport) |
 | `embr-search-engine` | symbol/string | `'google` | `'google`, `'brave`, `'duckduckgo`, or custom URL with `%s` |
 | `embr-click-method` | symbol | `'atomic` | `'atomic` defers mousedown until drag detected, better iframe compat. `'immediate` sends mousedown instantly, for press-and-hold sites. |
-| `embr-scroll-method` | symbol | `'smooth` | `'smooth` scrolls 300px animated. `'instant` scrolls 100px, choppy line-by-line. |
+| `embr-scroll-method` | symbol | `'instant` | `'smooth` scrolls with CSS animation. `'instant` scrolls instantly, line-by-line feel. |
+| `embr-scroll-step` | integer | `100` | Scroll distance in pixels per wheel notch |
 | `embr-external-command` | string | yt-dlp + mpv | Shell command for `&` key (`%s` = URL). Default pipes through yt-dlp into mpv. |
 
 
@@ -185,7 +194,7 @@ Browser sessions persist across restarts. Cookies and login state are stored in 
 
 The browser is controlled via the Chrome DevTools Protocol (CDP) over a single pipe. Screenshot capture (`Page.captureScreenshot`) sends ~60KB per frame and dominates the pipe's bandwidth. Mouse and keyboard input (`Input.dispatch*`) must share the same pipe.
 
-Under high-FPS video playback (e.g. 1080p 60fps YouTube), screenshot traffic can starve input commands — a CDP `Input.dispatchMouseEvent` call may hang indefinitely waiting for pipe bandwidth, freezing all mouse interaction while the video keeps playing.
+Under video playback, screenshot traffic can starve input commands — a CDP `Input.dispatchMouseEvent` call may hang indefinitely waiting for pipe bandwidth, freezing all mouse interaction while the video keeps playing.
 
 embr uses several strategies to prevent this:
 
@@ -212,13 +221,13 @@ The mouse deadlock chain was always: sustained hover traffic (15 Hz) + screensho
 
 The full keyboard flow: `C-n`/`C-p` to scroll, `C-c h` for Vimium-style link hints, `Tab` to cycle form fields, `C-s` to find text, `C-c l` to navigate. See [Keybindings](#keybindings) for the complete list.
 
-**Known side effect:** During high-FPS video playback, clicks may not register if the mouse is moving. The hover timer sends CDP `page.mouse.move()` at 15 Hz, which competes for pipe bandwidth with the click's `page.evaluate()` call. Workaround: hold the mouse still, then click. This tradeoff exists to prevent CDP deadlocks that would otherwise freeze all input indefinitely. Improving this is ongoing.
+**Known side effect:** During video playback, clicks may not register if the mouse is moving. The hover timer sends CDP `page.mouse.move()` at `embr-hover-rate` Hz, which competes for pipe bandwidth with the click's `page.evaluate()` call. Workaround: hold the mouse still, then click. This tradeoff exists to prevent CDP deadlocks that would otherwise freeze all input indefinitely. Improving this is ongoing.
 
 ## FAQ
 
 ### Does audio/video work?
 
-**Video playback works.** Frame rate depends on `embr-fps` (default 60). YouTube may throttle unauthenticated sessions.
+**Video playback works.** Frame rate depends on `embr-fps` (default 30). YouTube may throttle unauthenticated sessions.
 
 **Audio playback works.** Headless Firefox routes audio through PulseAudio/PipeWire.
 

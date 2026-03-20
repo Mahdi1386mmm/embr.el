@@ -66,8 +66,20 @@ Should be >= viewport height.  Set to your monitor resolution for a
 realistic browser fingerprint."
   :type 'integer)
 
-(defcustom embr-fps 60
+(defcustom embr-fps 30
   "Target frames per second for the screenshot stream."
+  :type 'integer)
+
+(defcustom embr-jpeg-quality 80
+  "JPEG quality for screenshot frames (1-100).
+Lower values reduce frame size and CDP pipe contention at the cost
+of image quality.  At 80 frames are ~60KB; at 50 they are ~30KB."
+  :type 'integer)
+
+(defcustom embr-hover-rate 8
+  "Mouse hover tracking rate in Hz.
+Lower values reduce CDP pipe contention (improving click reliability
+during video playback) at the cost of hover responsiveness."
   :type 'integer)
 
 (defcustom embr-external-command "yt-dlp -o - %s | mpv -"
@@ -90,12 +102,16 @@ Useful for sites that rely on press-and-hold interactions."
   :type '(choice (const :tag "Atomic (single click call)" atomic)
                  (const :tag "Immediate (mousedown/mouseup)" immediate)))
 
-(defcustom embr-scroll-method 'smooth
+(defcustom embr-scroll-method 'instant
   "How scrolling behaves.
-`smooth' scrolls 300px with CSS smooth behavior.
-`instant' scrolls 100px instantly (choppy, line-by-line feel)."
-  :type '(choice (const :tag "Smooth (300px smooth)" smooth)
-                 (const :tag "Instant (100px instant)" instant)))
+`smooth' scrolls with CSS smooth behavior.
+`instant' scrolls instantly (choppy, line-by-line feel)."
+  :type '(choice (const :tag "Smooth" smooth)
+                 (const :tag "Instant" instant)))
+
+(defcustom embr-scroll-step 100
+  "Scroll distance in pixels per wheel notch."
+  :type 'integer)
 
 
 (defcustom embr-search-engine 'google
@@ -463,10 +479,8 @@ Better compatibility with iframe widgets like Cloudflare Turnstile."
 
 
 (defun embr--scroll-delta ()
-  "Return the scroll delta in pixels based on `embr-scroll-method'."
-  (pcase embr-scroll-method
-    ('smooth 300)
-    (_ 100)))
+  "Return the scroll delta in pixels."
+  embr-scroll-step)
 
 (defun embr--scroll-behavior ()
   "Return the scroll behavior string based on `embr-scroll-method'."
@@ -537,7 +551,7 @@ Better compatibility with iframe widgets like Cloudflare Turnstile."
 (defun embr--hover-start ()
   "Start the hover tracking timer."
   (embr--hover-stop)
-  (setq embr--hover-timer (run-at-time 0 (/ 1.0 15) #'embr--hover-tick)))
+  (setq embr--hover-timer (run-at-time 0 (/ 1.0 embr-hover-rate) #'embr--hover-tick)))
 
 (defun embr--hover-stop ()
   "Stop the hover tracking timer."
@@ -965,7 +979,8 @@ If the daemon is already running, just navigate to the new URL."
                    (height . ,embr--viewport-height)
                    (screen_width . ,embr-screen-width)
                    (screen_height . ,embr-screen-height)
-                   (fps . ,embr-fps)))))
+                   (fps . ,embr-fps)
+                   (jpeg_quality . ,embr-jpeg-quality)))))
       (if (alist-get 'error resp)
           (error "embr: init failed: %s" (alist-get 'error resp))
         ;; Daemon tells us where it writes frames.
