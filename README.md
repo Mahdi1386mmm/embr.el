@@ -49,9 +49,9 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
   :config
   (setq embr-python "~/.local/share/embr/.venv/bin/python" ;; auto-detected
         embr-script (expand-file-name "embr.py" embr--directory) ;; auto-detected
-        embr-fps 45
-        embr-jpeg-quality 65
-        embr-hover-rate 18
+        embr-fps 60
+        embr-jpeg-quality 80
+        embr-hover-rate 20
         embr-default-width 1280
         embr-default-height 720
         embr-screen-width 1920
@@ -60,15 +60,15 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
         embr-search-engine 'google
         embr-click-method 'immediate
         embr-scroll-method 'instant
-        embr-scroll-step 100
+        embr-scroll-step 120
         embr-dom-caret-hack t
         embr-perf-log nil
-        embr-input-priority-window-ms 60
+        embr-input-priority-window-ms 35
         embr-adaptive-capture t
-        embr-adaptive-fps-min 24
-        embr-adaptive-jpeg-quality-min 55
+        embr-adaptive-fps-min 40
+        embr-adaptive-jpeg-quality-min 65
         embr-hover-move-threshold-px 0
-        embr-hover-rate-min 12
+        embr-hover-rate-min 14
         embr-external-command "yt-dlp -o - %s | mpv -"))
 ```
 
@@ -83,9 +83,9 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
   :config
   (setq embr-python "~/.local/share/embr/.venv/bin/python" ;; auto-detected
         embr-script (expand-file-name "embr.py" embr--directory) ;; auto-detected
-        embr-fps 45
-        embr-jpeg-quality 65
-        embr-hover-rate 18
+        embr-fps 60
+        embr-jpeg-quality 80
+        embr-hover-rate 20
         embr-default-width 1280
         embr-default-height 720
         embr-screen-width 1920
@@ -94,15 +94,15 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
         embr-search-engine 'google
         embr-click-method 'immediate
         embr-scroll-method 'instant
-        embr-scroll-step 100
+        embr-scroll-step 120
         embr-dom-caret-hack t
         embr-perf-log nil
-        embr-input-priority-window-ms 60
+        embr-input-priority-window-ms 35
         embr-adaptive-capture t
-        embr-adaptive-fps-min 24
-        embr-adaptive-jpeg-quality-min 55
+        embr-adaptive-fps-min 40
+        embr-adaptive-jpeg-quality-min 65
         embr-hover-move-threshold-px 0
-        embr-hover-rate-min 12
+        embr-hover-rate-min 14
         embr-external-command "yt-dlp -o - %s | mpv -"))
 ```
 
@@ -147,9 +147,9 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 |----------|------|---------|-------------|
 | `embr-python` | file | auto-detected | Path to Python interpreter in the embr venv. Default: `~/.local/share/embr/.venv/bin/python`. |
 | `embr-script` | file | auto-detected | Path to the embr.py daemon script. Default: auto-detected from package install directory. |
-| `embr-fps` | integer | `45` | Target frames per second |
-| `embr-jpeg-quality` | integer | `65` | JPEG quality (1-100). Lower = smaller frames, less CDP contention, worse image. 50 halves frame size. |
-| `embr-hover-rate` | integer | `18` | Mouse hover tracking rate in Hz. Lower = better click reliability during video, less responsive hover. |
+| `embr-fps` | integer | `60` | Target frames per second |
+| `embr-jpeg-quality` | integer | `80` | JPEG quality (1-100). Lower = smaller frames, less CDP contention, worse image. 50 halves frame size. |
+| `embr-hover-rate` | integer | `20` | Mouse hover tracking rate in Hz. Lower = better click reliability during video, less responsive hover. |
 | `embr-default-width` | integer | `1280` | Viewport width in pixels |
 | `embr-default-height` | integer | `720` | Viewport height in pixels |
 | `embr-screen-width` | integer | `1920` | Screen width reported to websites (should be >= viewport) |
@@ -158,26 +158,26 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-search-engine` | symbol/string | `'google` | `'google`, `'brave`, `'duckduckgo`, or custom URL with `%s` |
 | `embr-click-method` | symbol | `'immediate` | `'atomic` defers mousedown until drag detected, better iframe compat. `'immediate` sends mousedown instantly, for press-and-hold sites. |
 | `embr-scroll-method` | symbol | `'instant` | `'smooth` scrolls with CSS animation. `'instant` scrolls instantly, line-by-line feel. |
-| `embr-scroll-step` | integer | `100` | Scroll distance in pixels per wheel notch |
+| `embr-scroll-step` | integer | `120` | Scroll distance in pixels per wheel notch |
 | `embr-dom-caret-hack` | boolean | `t` | Inject a fake DOM caret in focused text fields. CDP screenshots don't capture the native caret. |
 | `embr-perf-log` | boolean | `nil` | Write JSONL perf events to `/tmp/embr-perf.jsonl`. Analyze with `tools/embr-perf-report.py`. |
-| `embr-input-priority-window-ms` | integer | `60` | Milliseconds to suppress frame capture after interactive input. Frees CDP pipe for input commands. 0 to disable. |
+| `embr-input-priority-window-ms` | integer | `35` | Milliseconds to suppress frame capture after interactive input. Frees CDP pipe for input commands. 0 to disable. |
 | `embr-adaptive-capture` | boolean | `t` | Auto-tune FPS and JPEG quality based on capture cost. Lowers when over budget, recovers when stable. |
-| `embr-adaptive-fps-min` | integer | `24` | Minimum FPS the adaptive controller will step down to. |
-| `embr-adaptive-jpeg-quality-min` | integer | `55` | Minimum JPEG quality the adaptive controller will step down to. |
+| `embr-adaptive-fps-min` | integer | `40` | Minimum FPS the adaptive controller will step down to. |
+| `embr-adaptive-jpeg-quality-min` | integer | `65` | Minimum JPEG quality the adaptive controller will step down to. |
 | `embr-hover-move-threshold-px` | integer | `0` | Minimum pixel distance before sending a hover update. Filters sub-pixel jitter. |
-| `embr-hover-rate-min` | integer | `12` | Minimum hover rate (Hz) under load pressure. Hover self-throttles from `embr-hover-rate` to this. |
+| `embr-hover-rate-min` | integer | `14` | Minimum hover rate (Hz) under load pressure. Hover self-throttles from `embr-hover-rate` to this. |
 | `embr-external-command` | string | yt-dlp + mpv | Shell command for `&` key (`%s` = URL). Default pipes through yt-dlp into mpv. |
 
 ### New in this version
 
 The following variables were added for the responsiveness system. They work with safe defaults and require no action on upgrade:
 
-- `embr-input-priority-window-ms` — suppresses frame capture briefly after input (default 60ms, 0 to disable)
+- `embr-input-priority-window-ms` — suppresses frame capture briefly after input (default 35ms, 0 to disable)
 - `embr-adaptive-capture` — auto-tunes FPS/quality under load (default on)
-- `embr-adaptive-fps-min`, `embr-adaptive-jpeg-quality-min` — floors for the adaptive controller (24 FPS, quality 55)
+- `embr-adaptive-fps-min`, `embr-adaptive-jpeg-quality-min` — floors for the adaptive controller (40 FPS, quality 65)
 - `embr-hover-move-threshold-px` — filters sub-pixel hover jitter (default 0px)
-- `embr-hover-rate-min` — hover self-throttle floor under pressure (default 12 Hz)
+- `embr-hover-rate-min` — hover self-throttle floor under pressure (default 14 Hz)
 - `embr-perf-log` — enables JSONL performance logging for diagnostics (default off)
 
 ## Usage
@@ -267,7 +267,7 @@ Under video playback, screenshot traffic can starve input commands — a CDP `In
 embr uses several strategies to prevent this:
 
 - **Decoupled rendering**: The Emacs process filter stashes the latest frame instead of rendering synchronously. A timer renders frames at a capped rate, giving the Emacs event loop idle time to process user input between frames.
-- **Batch-read with mousemove coalescing**: The daemon reads all pending stdin commands at once and collapses consecutive `mousemove` messages down to one, preventing hover traffic (`embr-hover-rate` Hz, default 18) from starving real commands like clicks and navigation.
+- **Batch-read with mousemove coalescing**: The daemon reads all pending stdin commands at once and collapses consecutive `mousemove` messages down to one, preventing hover traffic (`embr-hover-rate` Hz, default 20) from starving real commands like clicks and navigation.
 - **Split CDP domains for input**: Click events are dispatched via `page.evaluate()` (Runtime domain) instead of `page.mouse.*()` (Input domain), so they don't contend with screenshot traffic. Mousedown and mouseup use CDP Input domain (`page.mouse.down()`/`page.mouse.up()`) for `isTrusted=true` native text selection — they are fire-and-forget and infrequent (one per drag). Scroll uses `page.evaluate()` (Runtime domain).
 - **Fire-and-forget mousemove**: Hover tracking uses CDP `page.mouse.move()` (for `isTrusted=true` CSS `:hover` support) but as a cancel-and-replace background task — each new move cancels the previous in-flight one. A hung move can never block screenshots, clicks, or the command loop.
 - **Fire-and-forget keyboard/scroll**: Keyboard and scroll commands run as independent asyncio tasks. Keyboard uses `page.keyboard.type()`/`page.keyboard.press()` (CDP Input domain) for `isTrusted=true` events; scroll uses `page.evaluate()` (Runtime domain). Both are fire-and-forget and cannot block each other or the command loop.
@@ -282,10 +282,10 @@ The keyboard flow does not hit the deadlock conditions because:
 
 1. **No continuous CDP Input traffic** — the hover timer is silent when the mouse isn't moving, so zero background `page.mouse.move()` calls competing with screenshots.
 2. **No shared mutable state** — keyboard events are independent (no position/button state to corrupt between concurrent calls).
-3. **One-off not sustained** — a key press is a single CDP call, not 18/sec like hover. Even under full screenshot load, it finds a gap within one frame cycle (~60ms).
+3. **One-off not sustained** — a key press is a single CDP call, not 20/sec like hover. Even under full screenshot load, it finds a gap within one frame cycle (~60ms).
 4. **Fire-and-forget** — even if a key event lags, nothing blocks. The command loop continues, screenshots continue, and the next key press goes through independently.
 
-The mouse deadlock chain was always: sustained hover traffic (18 Hz) + screenshot traffic (45 Hz) = saturated pipe → any additional CDP Input call hangs → cascading failure. Keyboard-only removes the sustained part entirely. You go from ~63 CDP calls/sec (45 screenshot + 18 hover) down to ~45 (just screenshots) with occasional key presses that slip through the gaps.
+The mouse deadlock chain was always: sustained hover traffic (20 Hz) + screenshot traffic (60 Hz) = saturated pipe → any additional CDP Input call hangs → cascading failure. Keyboard-only removes the sustained part entirely. You go from ~80 CDP calls/sec (60 screenshot + 20 hover) down to ~60 (just screenshots) with occasional key presses that slip through the gaps.
 
 The full keyboard flow: `C-n`/`C-p` to scroll, `C-c h` for Vimium-style link hints, `Tab` to cycle form fields, `C-s` to find text, `C-c l` to navigate. See [Keybindings](#keybindings) for the complete list.
 

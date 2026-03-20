@@ -87,14 +87,14 @@ async def main():
     # Input-priority scheduler state.
     input_priority_until = 0.0      # monotonic ts — capture suppressed until this
     mode = "watch"                  # "interactive" or "watch"
-    input_priority_window_s = 0.060 # from init params (default 60ms)
+    input_priority_window_s = 0.035 # from init params (default 35ms)
 
     # Adaptive capture controller state.
     adaptive_enabled = False
-    fps_min = 24
-    fps_max = 45          # set to user-configured ceiling at init
-    quality_min = 55
-    quality_max = 65      # set to user-configured ceiling at init
+    fps_min = 40
+    fps_max = 60          # set to user-configured ceiling at init
+    quality_min = 65
+    quality_max = 80      # set to user-configured ceiling at init
     capture_ema = 0.0
     stable_frames = 0
     adapt_cooldown = 0
@@ -382,18 +382,18 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
             if dom_caret:
                 await context.add_init_script(_CARET_BODY)
 
-            target_fps = params.get("fps", 45)
-            jpeg_quality = params.get("jpeg_quality", 65)
+            target_fps = params.get("fps", 60)
+            jpeg_quality = params.get("jpeg_quality", 80)
 
             # Input-priority scheduler params.
             input_priority_window_s = params.get(
-                "input_priority_window_ms", 60) / 1000.0
+                "input_priority_window_ms", 35) / 1000.0
 
             # Adaptive capture controller params.
             adaptive_enabled = bool(params.get("adaptive_capture", False))
-            fps_min = params.get("adaptive_fps_min", 24)
+            fps_min = params.get("adaptive_fps_min", 40)
             fps_max = target_fps
-            quality_min = params.get("adaptive_jpeg_quality_min", 55)
+            quality_min = params.get("adaptive_jpeg_quality_min", 65)
             quality_max = jpeg_quality
 
             page = context.pages[0] if context.pages else await context.new_page()

@@ -65,17 +65,17 @@ Should be >= viewport height.  Set to your monitor resolution for a
 realistic browser fingerprint."
   :type 'integer)
 
-(defcustom embr-fps 45
+(defcustom embr-fps 60
   "Target frames per second for the screenshot stream."
   :type 'integer)
 
-(defcustom embr-jpeg-quality 65
+(defcustom embr-jpeg-quality 80
   "JPEG quality for screenshot frames (1-100).
 Lower values reduce frame size and CDP pipe contention at the cost
 of image quality.  At 80 frames are ~60KB; at 50 they are ~30KB."
   :type 'integer)
 
-(defcustom embr-hover-rate 18
+(defcustom embr-hover-rate 20
   "Mouse hover tracking rate in Hz.
 Lower values reduce CDP pipe contention (improving click reliability
 during video playback) at the cost of hover responsiveness."
@@ -108,7 +108,7 @@ Useful for sites that rely on press-and-hold interactions."
   :type '(choice (const :tag "Smooth" smooth)
                  (const :tag "Instant" instant)))
 
-(defcustom embr-scroll-step 100
+(defcustom embr-scroll-step 120
   "Scroll distance in pixels per wheel notch."
   :type 'integer)
 
@@ -143,7 +143,7 @@ When non-nil, the daemon writes JSONL performance events to
 /tmp/embr-perf.jsonl for analysis with tools/embr-perf-report.py."
   :type 'boolean)
 
-(defcustom embr-input-priority-window-ms 60
+(defcustom embr-input-priority-window-ms 35
   "Milliseconds to suppress frame capture after interactive input.
 During this window the daemon drops screenshot captures so the CDP
 pipe is free for input commands.  Set to 0 to disable."
@@ -155,11 +155,11 @@ When non-nil, the daemon lowers FPS and quality when capture time
 exceeds the frame budget, and recovers when headroom returns."
   :type 'boolean)
 
-(defcustom embr-adaptive-fps-min 24
+(defcustom embr-adaptive-fps-min 40
   "Minimum FPS the adaptive controller will step down to."
   :type 'integer)
 
-(defcustom embr-adaptive-jpeg-quality-min 55
+(defcustom embr-adaptive-jpeg-quality-min 65
   "Minimum JPEG quality the adaptive controller will step down to."
   :type 'integer)
 
@@ -169,7 +169,7 @@ Filters out sub-pixel jitter.  Higher values reduce CDP traffic
 at the cost of hover precision."
   :type 'integer)
 
-(defcustom embr-hover-rate-min 12
+(defcustom embr-hover-rate-min 14
   "Minimum hover rate in Hz when the daemon signals load pressure.
 The hover timer runs at `embr-hover-rate' normally, but self-throttles
 to this rate when the daemon is under input pressure."
