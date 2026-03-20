@@ -177,9 +177,42 @@ The blocklist is downloaded automatically by `setup.sh` and refreshed every time
 
 ## How It Works
 
-Emacs spawns a Python subprocess (`embr.py`) that controls headless Firefox through [Camoufox](https://camoufox.com/) (a Playwright-compatible anti-detect Firefox fork). They communicate via JSON lines over stdin/stdout. The daemon streams JPEG screenshots at ~30 FPS via a temp file on disk, giving live visual feedback.
+Emacs spawns a Python subprocess (`embr.py`) that controls headless Firefox through [Camoufox](https://camoufox.com/) (a Playwright-compatible anti-detect Firefox fork). They communicate via JSON lines over stdin/stdout. The daemon streams JPEG screenshots via a temp file on disk, giving live visual feedback.
 
 Browser sessions persist across restarts. Cookies and login state are stored in `~/.local/share/embr/firefox-profile/`.
+
+### Avoiding CDP deadlocks
+
+The browser is controlled via the Chrome DevTools Protocol (CDP) over a single pipe. Screenshot capture (`Page.captureScreenshot`) sends ~60KB per frame and dominates the pipe's bandwidth. Mouse and keyboard input (`Input.dispatch*`) must share the same pipe.
+
+Under high-FPS video playback (e.g. 1080p 60fps YouTube), screenshot traffic can starve input commands — a CDP `Input.dispatchMouseEvent` call may hang indefinitely waiting for pipe bandwidth, freezing all mouse interaction while the video keeps playing.
+
+embr uses several strategies to prevent this:
+
+- **Decoupled rendering**: The Emacs process filter stashes the latest frame instead of rendering synchronously. A timer renders frames at a capped rate, giving the Emacs event loop idle time to process user input between frames.
+- **Batch-read with mousemove coalescing**: The daemon reads all pending stdin commands at once and collapses consecutive `mousemove` messages down to one, preventing hover traffic (15 Hz) from starving real commands like clicks and navigation.
+- **Split CDP domains for input**: Click, mousedown, and mouseup events are dispatched via `page.evaluate()` (Runtime domain) instead of `page.mouse.*()` (Input domain). The Runtime domain does not contend with screenshot traffic. Scroll and keyboard events also use this path.
+- **Fire-and-forget mousemove**: Hover tracking uses CDP `page.mouse.move()` (for `isTrusted=true` CSS `:hover` support) but as a cancel-and-replace background task — each new move cancels the previous in-flight one. A hung move can never block screenshots, clicks, or the command loop.
+- **Fire-and-forget keyboard/scroll**: Keyboard and scroll commands run as independent asyncio tasks. They use `page.evaluate()` (Runtime domain) and cannot block each other or the command loop.
+- **Title caching**: `page.title()` is queried once per second instead of every frame, halving per-frame CDP traffic.
+- **Safety timeout**: A 35-second outer timeout on the command loop ensures that even if a navigation or page load hangs, the daemon recovers and continues processing input.
+
+The net effect: video playback stays smooth, mouse hover updates CSS `:hover` state correctly, and clicks/keyboard/scroll never hang regardless of screenshot throughput. Click events are JavaScript-dispatched (`isTrusted=false`), which works for most sites but may not trigger browser-gated actions like the Fullscreen API.
+
+### Keyboard-driven browsing
+
+The keyboard flow does not hit the deadlock conditions because:
+
+1. **No continuous CDP Input traffic** — the hover timer is silent when the mouse isn't moving, so zero background `page.mouse.move()` calls competing with screenshots.
+2. **No shared mutable state** — keyboard events are independent (no position/button state to corrupt between concurrent calls).
+3. **One-off not sustained** — a key press is a single CDP call, not 15/sec like hover. Even under full screenshot load, it finds a gap within one frame cycle (~60ms).
+4. **Fire-and-forget** — even if a key event lags, nothing blocks. The command loop continues, screenshots continue, and the next key press goes through independently.
+
+The mouse deadlock chain was always: sustained hover traffic (15 Hz) + screenshot traffic (16 Hz) = saturated pipe → any additional CDP Input call hangs → cascading failure. Keyboard-only removes the sustained part entirely. You go from ~47 CDP calls/sec (32 screenshot + 15 hover) down to ~32 (just screenshots) with occasional key presses that slip through the gaps.
+
+The full keyboard flow: `C-n`/`C-p` to scroll, `C-c h` for Vimium-style link hints, `Tab` to cycle form fields, `C-s` to find text, `C-c l` to navigate. See [Keybindings](#keybindings) for the complete list.
+
+**Known side effect:** During high-FPS video playback, clicks may not register if the mouse is moving. The hover timer sends CDP `page.mouse.move()` at 15 Hz, which competes for pipe bandwidth with the click's `page.evaluate()` call. Workaround: hold the mouse still, then click. This tradeoff exists to prevent CDP deadlocks that would otherwise freeze all input indefinitely. Improving this is ongoing.
 
 ## FAQ
 

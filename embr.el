@@ -298,8 +298,6 @@ This does NOT remove the Emacs package itself — use your package manager for t
   "Read the JPEG frame from disk and display it.  Update title/url from RESP."
   (let ((title (or (alist-get 'title resp) ""))
         (url (or (alist-get 'url resp) "")))
-    (setq embr--current-title title
-          embr--current-url url)
     (when (and embr--frame-path
                (file-exists-p embr--frame-path)
                (buffer-live-p embr--buffer))
@@ -317,9 +315,14 @@ This does NOT remove the Emacs package itself — use your package manager for t
             (remove-text-properties (point-min) (point-max) '(keymap nil))
             (put-text-property (point-min) (point-max) 'pointer 'arrow)
             (goto-char (point-min)))
-          (rename-buffer (format "*embr: %s*"
-                                 (if (string-empty-p title) url title))
-                         t))))))
+          ;; Only rename buffer when title/url actually changes.
+          (unless (and (string= title embr--current-title)
+                       (string= url embr--current-url))
+            (rename-buffer (format "*embr: %s*"
+                                   (if (string-empty-p title) url title))
+                           t))))
+      (setq embr--current-title title
+            embr--current-url url))))
 
 (defun embr--action-callback (resp)
   "Generic callback for command responses: report errors."
@@ -514,7 +517,12 @@ Better compatibility with iframe widgets like Cloudflare Turnstile."
                (edges (and win (window-inside-pixel-edges win)))
                (img-x (and edges (- px (nth 0 edges))))
                (img-y (and edges (- py (nth 1 edges)))))
-          (when (and img-x img-y (>= img-x 0) (>= img-y 0)
+          ;; Clamp to viewport bounds — out-of-bounds coords confuse Playwright.
+          (when img-x
+            (setq img-x (max 0 (min img-x (1- (or embr--viewport-width embr-default-width))))))
+          (when img-y
+            (setq img-y (max 0 (min img-y (1- (or embr--viewport-height embr-default-height))))))
+          (when (and img-x img-y
                      (not (and (eql img-x embr--hover-last-x)
                                (eql img-y embr--hover-last-y))))
             (setq embr--hover-last-x img-x

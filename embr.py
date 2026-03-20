@@ -37,8 +37,8 @@ async def main():
     loop_task = None
     running = True
     target_fps = 60
-    screenshots_ok = asyncio.Event()
-    screenshots_ok.set()
+    cached_title = ""
+    frame_count = 0
 
     user_data_dir = Path.home() / ".local" / "share" / "embr" / "firefox-profile"
     user_data_dir.mkdir(parents=True, exist_ok=True)
@@ -49,18 +49,21 @@ async def main():
 
     async def write_frame():
         """Take a JPEG screenshot, write atomically to disk, notify Emacs."""
+        nonlocal cached_title, frame_count
         jpg_bytes = await page.screenshot(type="jpeg", quality=80)
         tmp = FRAME_PATH + ".tmp"
         with open(tmp, "wb") as f:
             f.write(jpg_bytes)
         os.rename(tmp, FRAME_PATH)
-        emit({"frame": True, "title": await page.title(), "url": page.url})
+        frame_count += 1
+        if frame_count % 15 == 0:
+            cached_title = await page.title()
+        emit({"frame": True, "title": cached_title, "url": page.url})
 
     async def screenshot_loop():
         """Continuously capture frames at target FPS."""
         while running:
             if page is not None:
-                await screenshots_ok.wait()
                 start = asyncio.get_event_loop().time()
                 try:
                     await write_frame()
@@ -71,72 +74,34 @@ async def main():
             else:
                 await asyncio.sleep(0.05)
 
-    # ── Mouse worker: serializes mouse CDP calls so concurrent
-    # fire-and-forget tasks don't race on Playwright's shared mouse state.
-    mouse_queue = asyncio.Queue()
+    # ── Mouse handling ──────────────────────────────────────────────
+    # Clicks use page.evaluate() (Runtime domain) — never contends
+    # with the screenshot loop's Page.captureScreenshot traffic.
+    # Mousemove uses CDP page.mouse.move() for isTrusted=true (CSS
+    # :hover), as fire-and-forget with cancel-and-replace so it can
+    # never block anything.
+    mouse_move_task = None
 
-    async def mouse_worker():
-        while running:
-            item = await mouse_queue.get()
-            # Drain any additional queued commands; coalesce mousemoves.
-            items = [item]
-            while not mouse_queue.empty():
-                items.append(mouse_queue.get_nowait())
-            commands = []
-            last_move = None
-            for c, p in items:
-                if c == "mousemove":
-                    last_move = (c, p)
-                else:
-                    if last_move:
-                        commands.append(last_move)
-                        last_move = None
-                    commands.append((c, p))
-            if last_move:
-                commands.append(last_move)
-            for c, p in commands:
-                try:
-                    await _do_mouse(c, p)
-                except Exception:
-                    pass
+    _MOUSE_JS = """([type, x, y]) => {
+        const el = document.elementFromPoint(x, y);
+        if (!el) return;
+        const opts = {bubbles: true, cancelable: true, view: window,
+                      clientX: x, clientY: y, button: 0};
+        el.dispatchEvent(new PointerEvent(type.replace('mouse', 'pointer'), opts));
+        el.dispatchEvent(new MouseEvent(type, opts));
+    }"""
 
-    async def _do_mouse(c, p):
-        x, y = p.get("x", 0), p.get("y", 0)
-        if c in ("click", "mousedown", "mouseup"):
-            # Briefly pause screenshots so the CDP Input call gets
-            # exclusive bandwidth.  Without this, screenshot traffic
-            # (~32 CDP calls/sec) starves Input.dispatch* indefinitely.
-            screenshots_ok.clear()
-            try:
-                if c == "click":
-                    await asyncio.wait_for(page.mouse.click(x, y), timeout=0.5)
-                elif c == "mousedown":
-                    await asyncio.wait_for(page.mouse.move(x, y), timeout=0.25)
-                    await asyncio.wait_for(page.mouse.down(), timeout=0.25)
-                elif c == "mouseup":
-                    await asyncio.wait_for(page.mouse.move(x, y), timeout=0.25)
-                    await asyncio.wait_for(page.mouse.up(), timeout=0.25)
-            except asyncio.TimeoutError:
-                # Still timed out even with exclusive bandwidth — reset.
-                try:
-                    await asyncio.wait_for(page.mouse.up(), timeout=0.25)
-                except Exception:
-                    pass
-            finally:
-                screenshots_ok.set()
-        elif c == "mousemove":
-            # Mousemove via evaluate — no isTrusted needed, avoids
-            # flooding the CDP Input pipeline from 15Hz hover timer.
-            await page.evaluate("""([x, y]) => {
-                const el = document.elementFromPoint(x, y);
-                if (el) el.dispatchEvent(new MouseEvent('mousemove', {
-                    bubbles: true, cancelable: true, view: window,
-                    clientX: x, clientY: y
-                }));
-            }""", [x, y])
+    _CLICK_JS = """([x, y]) => {
+        const el = document.elementFromPoint(x, y);
+        if (!el) return;
+        const opts = {bubbles: true, cancelable: true, view: window,
+                      clientX: x, clientY: y, button: 0};
+        for (const t of ['pointerdown','mousedown','pointerup','mouseup','click'])
+            el.dispatchEvent(new MouseEvent(t, opts));
+    }"""
 
     async def handle(cmd, params):
-        nonlocal context, page, running, loop_task, target_fps
+        nonlocal context, page, running, loop_task, target_fps, cached_title
 
         if cmd == "init":
             width = params.get("width", 1280)
@@ -178,7 +143,6 @@ async def main():
             # Force our exact viewport size (camoufox may derive a different one from its fingerprint).
             await page.set_viewport_size({"width": width, "height": height})
             loop_task = asyncio.create_task(screenshot_loop())
-            asyncio.create_task(mouse_worker())
             return {"ok": True, "frame_path": FRAME_PATH}
 
         if context is None or page is None:
@@ -192,13 +156,37 @@ async def main():
                 await page.goto(url, wait_until="domcontentloaded", timeout=10000)
             except Exception:
                 pass  # Timeout or nav error — page state visible via screenshots.
+            cached_title = await page.title()
             return {"ok": True}
 
-        # Mouse commands go through a serialized worker queue so they
-        # don't race on Playwright's shared mouse state, but also don't
-        # block the command loop.
-        if cmd in ("click", "mousedown", "mouseup", "mousemove"):
-            await mouse_queue.put((cmd, params))
+        # Mousemove: fire-and-forget CDP (isTrusted=true for CSS :hover).
+        # Cancel-and-replace — each new move cancels the previous.
+        if cmd == "mousemove":
+            nonlocal mouse_move_task
+            if mouse_move_task and not mouse_move_task.done():
+                mouse_move_task.cancel()
+            async def _move(x, y):
+                try:
+                    await page.mouse.move(x, y)
+                except Exception:
+                    pass
+            mouse_move_task = asyncio.create_task(
+                _move(params.get("x", 0), params.get("y", 0)))
+            return {"ok": True}
+
+        # Click/mousedown/mouseup: JS evaluate (Runtime domain, never
+        # contends with screenshot traffic on the CDP pipe).
+        if cmd == "click":
+            asyncio.create_task(
+                page.evaluate(_CLICK_JS, [params["x"], params["y"]]))
+            return {"ok": True}
+        if cmd == "mousedown":
+            asyncio.create_task(
+                page.evaluate(_MOUSE_JS, ["mousedown", params["x"], params["y"]]))
+            return {"ok": True}
+        if cmd == "mouseup":
+            asyncio.create_task(
+                page.evaluate(_MOUSE_JS, ["mouseup", params["x"], params["y"]]))
             return {"ok": True}
 
         # Keyboard and scroll are also fire-and-forget: these are
@@ -226,6 +214,7 @@ async def main():
                 await page.go_back(wait_until="domcontentloaded", timeout=5000)
             except Exception:
                 pass
+            cached_title = await page.title()
             return {"ok": True}
 
         if cmd == "forward":
@@ -233,6 +222,7 @@ async def main():
                 await page.go_forward(wait_until="domcontentloaded", timeout=5000)
             except Exception:
                 pass
+            cached_title = await page.title()
             return {"ok": True}
 
         if cmd == "refresh":
@@ -240,6 +230,7 @@ async def main():
                 await page.reload(wait_until="domcontentloaded", timeout=10000)
             except Exception:
                 pass
+            cached_title = await page.title()
             return {"ok": True}
 
         if cmd == "js":
@@ -329,6 +320,7 @@ async def main():
             if 0 <= idx < len(context.pages):
                 page = context.pages[idx]
                 await page.bring_to_front()
+                cached_title = await page.title()
                 return {"ok": True}
             return {"error": f"tab index out of range: {idx}"}
 
@@ -390,7 +382,6 @@ async def main():
         if last_mousemove is not None:
             commands.append(last_mousemove)
 
-        # Process the coalesced batch.  Pause the screenshot loop so
         should_exit = False
         for msg in commands:
             cmd = msg.get("cmd", "")
