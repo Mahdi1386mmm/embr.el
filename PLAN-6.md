@@ -22,7 +22,7 @@ This plan is explicit about execution style:
 - Keep uBlock Origin enabled.
 - Keep images enabled.
 - Keep non-virtual headless mode.
-- Keep immediate rollback path to `strict` and `balanced`.
+- Keep immediate rollback path to `camoufox-default`, `strict`, and `balanced`.
 
 ## 3. Scope
 
@@ -49,6 +49,7 @@ This is for users who prioritize responsiveness and speed over maximum stealth m
 
 Required profiles after implementation:
 
+- `camoufox-default` (vanilla recovery from PLAN-5)
 - `strict` (existing baseline)
 - `balanced` (PLAN-5)
 - `aggressive` (PLAN-6 full bundle)
@@ -58,6 +59,7 @@ Rules:
 - default profile remains unchanged unless separately approved.
 - `aggressive` must be opt-in.
 - selecting `aggressive` must show explicit warning text in Emacs/messages.
+- every PLAN-6 pref relaxation must be gated so selecting `camoufox-default` removes all aggressive tuning deltas.
 
 ## 6. Aggressive-Full Runtime Bundle (MUST Implement)
 
@@ -217,6 +219,7 @@ Deliver one consolidated report containing:
 - unknown profile or bad pref map must fallback to `strict`.
 - startup log must include active profile and pref count.
 - docs must contain immediate rollback snippet.
+- rollback snippet must include path to `camoufox-default` as full tuning-off mode.
 
 ## 13. Reviewer Rejection Criteria
 
@@ -228,7 +231,8 @@ Reject if any are true:
 - images blocked,
 - virtual headless path introduced,
 - no explicit compatibility risk accounting,
-- no rollback path documented.
+- no rollback path documented,
+- no direct rollback path to `camoufox-default`.
 
 ## 14. Risks
 
@@ -242,7 +246,7 @@ Mitigations:
 
 - aggressive remains opt-in,
 - clear warning messaging,
-- immediate rollback to `balanced`/`strict`,
+- immediate rollback to `balanced`/`strict`/`camoufox-default`,
 - maintain compatibility scorecard in release notes.
 
 ## 15. Definition of Done

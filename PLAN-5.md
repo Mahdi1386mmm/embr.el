@@ -95,6 +95,7 @@ H4:
 
 Mandatory profiles:
 
+- `camoufox-default` (vanilla recovery): use Camoufox runtime defaults, with only hard product constraints from section 2 and explicit user/UI choices (for example color scheme) applied.
 - `strict` (baseline-preserving): current behavior, minimal changes.
 - `balanced` (target profile): performance-first but still practical stealth.
 
@@ -111,6 +112,7 @@ Add an Emacs-facing configuration for Camoufox profile selection.
 Required behavior:
 
 - default profile must be `strict` on first release,
+- user can switch to `camoufox-default` at any time,
 - user can opt into `balanced`,
 - profile choice is passed to daemon initialization.
 
@@ -142,6 +144,17 @@ Required behavior:
 - default install path can be plain `camoufox` package,
 - optional path enables `camoufox[geoip]` only when requested,
 - behavior documented clearly.
+
+## 9.5 MUST: Tuning Gate and Vanilla Rollback
+
+All Camoufox tuning deltas introduced by this plan must be profile-gated.
+
+Required behavior:
+
+- `camoufox-default` must apply no PLAN-5 performance-pref bundle,
+- `strict` and `balanced` may apply only their declared deltas,
+- user must be able to return to `camoufox-default` without reinstall or profile deletion,
+- rollback instructions to `camoufox-default` must be documented in README and troubleshooting notes.
 
 ## 10. `balanced` Profile Requirements
 
@@ -264,6 +277,7 @@ MUST:
 - keep high-risk stealth relaxations out of default path,
 - log profile selection at startup for diagnostics,
 - preserve deterministic fallback to `strict` on unknown config.
+- preserve explicit user path back to `camoufox-default`.
 
 SHOULD:
 
@@ -285,7 +299,8 @@ Deliver:
 
 - profile config exposed in Emacs,
 - daemon support for profile selection,
-- no behavior change in `strict`.
+- no behavior change in `strict`,
+- `camoufox-default` path wired end-to-end.
 
 ### M2: GeoIP Packaging Split
 
@@ -324,7 +339,8 @@ Reject if any are true:
 - virtual display mode is introduced as default/required,
 - no strict vs balanced comparative metrics provided,
 - stealth/compatibility regressions are unmeasured,
-- docs/config are out of sync.
+- docs/config are out of sync,
+- no user-visible rollback path to `camoufox-default`.
 
 ## 17. Expected Improvement Envelope
 
@@ -340,7 +356,7 @@ These are planning estimates, not guaranteed acceptance outcomes.
 
 `PLAN-5` is complete when:
 
-- strict and balanced profiles are implemented and documented,
+- camoufox-default, strict, and balanced profiles are implemented and documented,
 - geoip install split is implemented and documented,
 - mandatory gates in section 11 pass,
 - no hard-constraint violations in section 2,

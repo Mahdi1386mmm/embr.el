@@ -43,7 +43,10 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
         embr-hover-rate-min 14
         embr-external-command "yt-dlp -o - %s | mpv -"
         embr-booster nil
-        embr-booster-args nil))
+        embr-booster-args nil
+        embr-idle-timeout 5
+        embr-background-timeout 30
+        embr-shm-transport t))
 ```
 
 **straight.el**
@@ -77,7 +80,10 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
         embr-hover-rate-min 14
         embr-external-command "yt-dlp -o - %s | mpv -"
         embr-booster nil
-        embr-booster-args nil))
+        embr-booster-args nil
+        embr-idle-timeout 5
+        embr-background-timeout 30
+        embr-shm-transport t))
 ```
 
 **Tip:** Make embr your default Emacs browser and enable clickable URLs everywhere:
@@ -147,11 +153,17 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-booster` | boolean | `nil` | When non-nil, launch embr-booster C proxy between Emacs and embr.py for priority scheduling. |
 | `embr-booster-path` | file | `~/.local/share/embr/embr-booster` | Path to the compiled embr-booster binary. |
 | `embr-booster-args` | list | `nil` | Additional CLI arguments for embr-booster (e.g. `("--log-level" "debug")`). |
+| `embr-idle-timeout` | integer | `5` | Seconds of no input before entering idle capture mode (5 FPS, min quality). |
+| `embr-background-timeout` | integer | `30` | Seconds of no input before entering background capture mode (1 FPS, min quality). |
+| `embr-shm-transport` | boolean | `t` | Use shared memory for frame transport on Linux. Falls back to disk if unavailable. |
 
 ### New in this version
 
-The following variables were added for the responsiveness system. They work with safe defaults and require no action on upgrade:
+The following variables were added for the rendering and transport overhaul. They work with safe defaults and require no action on upgrade:
 
+- `embr-idle-timeout` — seconds before idle capture mode (default 5s, captures at 5 FPS)
+- `embr-background-timeout` — seconds before background capture mode (default 30s, captures at 1 FPS)
+- `embr-shm-transport` — shared memory frame transport on Linux (default on, falls back to disk)
 - `embr-input-priority-window-ms` — suppresses frame capture briefly after input (default 35ms, 0 to disable)
 - `embr-adaptive-capture` — auto-tunes FPS/quality under load (default on)
 - `embr-adaptive-fps-min`, `embr-adaptive-jpeg-quality-min` — floors for the adaptive controller (40 FPS, quality 65)
@@ -285,13 +297,42 @@ The booster provides:
 - **Frame rate limiting**: caps frame forwarding under pressure
 - **Backpressure**: bounded queues prevent unbounded memory growth
 
-To use it:
-1. Compile: `make booster` (requires a C compiler)
-2. Set `embr-booster` to `t` in your config
-
-The booster is protocol-transparent — same JSON lines, just reordered and coalesced. If the binary is missing, embr falls back to direct mode with a warning.
+The booster is compiled automatically by `setup.sh` if a C compiler is available, and `embr-booster` defaults to `t`. If the binary is missing when you launch `embr-browse`, Emacs will offer to compile it for you. The booster is protocol-transparent — same JSON lines, just reordered and coalesced. If compilation isn't possible, embr falls back to direct mode with a warning.
 
 **Known side effect:** During video playback, clicks may not register if the mouse is moving. The hover timer sends CDP `page.mouse.move()` at `embr-hover-rate` Hz, which competes for pipe bandwidth with the click's `page.evaluate()` call. Workaround: hold the mouse still, then click. This tradeoff exists to prevent CDP deadlocks that would otherwise freeze all input indefinitely. Improving this is ongoing.
+
+### Transport: shared memory vs disk
+
+By default on Linux, embr uses POSIX shared memory (`/dev/shm/`) to transfer frame data from the daemon to Emacs, bypassing filesystem I/O entirely. The daemon writes JPEG data to a double-buffered shm region (~1MB) and notifies Emacs via JSON with the slot offset and frame length. Emacs reads directly from the shm file.
+
+If shared memory is unavailable (non-Linux, permissions, or frame too large for the 512KB slot), the daemon falls back to the legacy disk transport: write to a temp file, rename atomically, Emacs reads the file.
+
+Set `embr-shm-transport` to `nil` to force disk transport. The shm region is cleaned up automatically when the daemon exits.
+
+### Activity-driven capture
+
+The daemon uses a four-state activity machine to reduce CPU and bandwidth when the page is not being interacted with:
+
+| State | FPS | Quality | Trigger |
+|-------|-----|---------|---------|
+| `interactive` | max | max | Any user input |
+| `watch` | max | max | Input-priority window expires |
+| `idle` | 5 | min | No input for `embr-idle-timeout` seconds |
+| `background` | 1 | min | No input for `embr-background-timeout` seconds |
+
+Any input immediately returns to `interactive`. The daemon also tracks buffer visibility — when the embr buffer is buried, it transitions to `idle` or `background` sooner.
+
+In `idle` and `background` states, identical frames are detected via CRC32 and skipped entirely (no disk write, no notification). A safety keyframe is forced every 300 frames.
+
+### Replay harness
+
+The `tools/embr-replay.py` script provides performance analysis and replay capabilities:
+
+- `embr-replay.py report` — generates a JSON performance report from `/tmp/embr-perf.jsonl` with p50/p95/p99 metrics and SLO pass/fail
+- `embr-replay.py record` — extracts a replayable input trace from the perf log
+- `embr-replay.py replay --trace FILE` — replays a trace with original timing
+
+Scenario definitions in `tools/scenarios/` specify URLs, durations, and SLO thresholds for automated benchmarking.
 
 ## FAQ
 
@@ -320,7 +361,7 @@ PLAN-2 (PLAN-2.md) -- DONE 0.30
 Adds a C-based embr-booster transport layer to prioritize control/input traffic over frame churn with bounded queues and backpressure policy. It improves responsiveness under load by reducing pipe contention and head-of-line blocking.
 
 PLAN-3 (PLAN-3.md)
-Moves beyond transport tuning into payload/render architecture: partial updates, binary channel, shared-memory path, and Emacs render optimization. It improves FPS and freshness by reducing full-frame bandwidth and stale-frame decode work.
+Moves beyond transport tuning into payload/render architecture: partial updates, binary channel, shared-memory path, and Emacs render optimization. It improves FPS and freshness by reducing full-frame bandwidth and stale-frame decode work. Track B (tile pipeline) deferred by ADR-001 pending image codec decision in PLAN-4.
 
 PLAN-4 (PLAN-4.md)
 Pushes the no-Emacs-patch performance ceiling with copy elimination, jitter control, optional module acceleration, and strict replay benchmarking. It targets tighter p95/p99 latency and higher sustained FPS without requiring an Emacs fork.
