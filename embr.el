@@ -1,17 +1,37 @@
-;;; embr.el --- Browse the web with headless Firefox in Emacs -*- lexical-binding: t; -*-
+;;; embr.el --- Browse the web with headless Firefox in Emacs  -*- lexical-binding: t; -*-
 
-;; Author: embr contributors
-;; Version: 0.2.0
+;; Copyright (C) 2026 emacs-os
+
+;; Author: emacs-os
 ;; Package-Requires: ((emacs "30.1"))
-;; Keywords: web, browser
+;; Keywords: web, browser, hypermedia
 ;; URL: https://github.com/emacs-os/embr.el
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
 ;; embr runs a headless Firefox (via Camoufox/Playwright) and displays
 ;; screenshots in an Emacs buffer.  Clicks, keystrokes, and scroll
-;; events are forwarded to the browser.  The daemon streams frames
-;; at ~30 FPS via JPEG files on disk.
+;; events are forwarded to the browser.  The daemon streams JPEG
+;; frames via a temp file on disk, giving live visual feedback.
+;;
+;; The Python daemon (`embr.py') controls the browser through Camoufox,
+;; a Playwright-compatible anti-detect Firefox fork.  Communication
+;; uses JSON lines over stdin/stdout.  An optional C proxy
+;; (`embr-booster') can sit between Emacs and the daemon for priority
+;; scheduling and message coalescing under load.
 
 ;;; Code:
 
@@ -175,6 +195,25 @@ The hover timer runs at `embr-hover-rate' normally, but self-throttles
 to this rate when the daemon is under input pressure."
   :type 'integer)
 
+(defcustom embr-booster nil
+  "When non-nil, launch embr-booster between Emacs and embr.py.
+The booster is a C proxy that provides priority scheduling, message
+coalescing, and input-priority windowing to reduce latency under load."
+  :type 'boolean)
+
+(defcustom embr-booster-path
+  (expand-file-name "embr-booster" embr--data-dir)
+  "Path to the compiled embr-booster binary.
+Default is ~/.local/share/embr/embr-booster (alongside the venv).
+The source is in the package directory under libexec/."
+  :type 'file)
+
+(defcustom embr-booster-args nil
+  "Additional CLI arguments for embr-booster.
+These are inserted between the booster binary and the `--' separator.
+Example: (\"--log-level\" \"debug\" \"--frame-forward-max-hz\" \"30\")"
+  :type '(repeat string))
+
 (defun embr--search-url (query)
   "Build a search URL for QUERY using `embr-search-engine'."
   (let ((template (pcase embr-search-engine
@@ -189,6 +228,10 @@ to this rate when the daemon is under input pressure."
 (defun embr--setup-needed-p ()
   "Return non-nil if setup.sh needs to be run."
   (not (file-exists-p embr-python)))
+
+(defun embr--booster-needed-p ()
+  "Return non-nil if booster is enabled but binary is missing."
+  (and embr-booster (not (file-executable-p embr-booster-path))))
 
 ;;;###autoload
 (defun embr-setup-or-update ()
@@ -211,6 +254,39 @@ Safe to run at any time — rebuilds in a temp venv and swaps atomically."
              (with-current-buffer (get-buffer "*embr-setup*")
                (goto-char (point-max))
                (insert "\nDone. You can now run M-x embr-browse.\n")))))))))
+
+;;;###autoload
+(defun embr-build-booster ()
+  "Compile the embr-booster C proxy.
+Requires a C compiler (cc or gcc).  The binary is written to
+`embr-booster-path'."
+  (interactive)
+  (let* ((src (or (let ((f (expand-file-name "libexec/embr-booster.c" embr--directory)))
+                    (and (file-exists-p f) f))
+                  (let ((f (expand-file-name "embr-booster.c" embr--directory)))
+                    (and (file-exists-p f) f))))
+         (out embr-booster-path)
+         (cc (or (getenv "CC") "cc")))
+    (unless src
+      (error "embr: embr-booster.c not found in %s" embr--directory))
+    (make-directory (file-name-directory out) t)
+    (let ((buf (get-buffer-create "*embr-setup*")))
+      (with-current-buffer buf (erase-buffer))
+      (pop-to-buffer buf)
+      (insert (format "Compiling embr-booster: %s -O2 -std=c11 -Wall -o %s %s\n\n"
+                      cc out src))
+      (let ((proc (start-process "embr-build-booster" buf
+                                  cc "-O2" "-std=c11" "-Wall" "-o" out src)))
+        (set-process-sentinel
+         proc
+         (lambda (proc event)
+           (with-current-buffer (get-buffer "*embr-setup*")
+             (goto-char (point-max))
+             (if (and (string-match-p "finished" event)
+                      (eq (process-exit-status proc) 0))
+                 (insert "\nDone. embr-booster compiled successfully.\n")
+               (insert (format "\nCompilation failed (exit %d).\n"
+                               (process-exit-status proc)))))))))))
 
 
 ;;;###autoload
@@ -256,6 +332,7 @@ This does NOT remove the Emacs package itself — use your package manager for t
   Venv:       %s (%s)
   Browsers:   %s (%s)
   Profile:    %s (%s)
+  Booster:    %s (%s)
   Setup needed: %s"
              embr--directory
              embr-python (if (file-exists-p embr-python) "OK" "MISSING")
@@ -263,6 +340,10 @@ This does NOT remove the Emacs package itself — use your package manager for t
              venv-dir (if (file-directory-p venv-dir) "OK" "MISSING")
              browsers-dir (if (file-directory-p browsers-dir) "OK" "MISSING")
              profile-dir (if (file-directory-p profile-dir) "exists" "not yet created")
+             embr-booster-path
+             (cond ((not embr-booster) "disabled")
+                   ((file-executable-p embr-booster-path) "OK")
+                   (t "MISSING — run make booster"))
              (embr--setup-needed-p))))
 
 ;; ── Internal state ─────────────────────────────────────────────────
@@ -289,19 +370,33 @@ This does NOT remove the Emacs package itself — use your package manager for t
 ;; ── Process management ─────────────────────────────────────────────
 
 (defun embr--start-daemon ()
-  "Start the Python daemon process."
+  "Start the Python daemon process.
+When `embr-booster' is non-nil and the binary exists, wrap the
+Python command with the booster proxy.  Falls back to direct mode
+with a warning if the binary is missing."
   (when (and embr--process (process-live-p embr--process))
     (delete-process embr--process))
   (setq embr--response-buffer "")
-  (setq embr--process
-        (make-process
-         :name "embr"
-         :command (list embr-python embr-script)
-         :connection-type 'pipe
-         :noquery t
-         :stderr (get-buffer-create "*embr-stderr*")
-         :filter #'embr--process-filter
-         :sentinel #'embr--process-sentinel)))
+  (let ((command
+         (if (and embr-booster
+                  (file-executable-p embr-booster-path))
+             (append (list embr-booster-path)
+                     embr-booster-args
+                     (list "--" embr-python embr-script))
+           (when (and embr-booster
+                      (not (file-executable-p embr-booster-path)))
+             (message "embr: booster enabled but %s not found, falling back to direct mode"
+                      embr-booster-path))
+           (list embr-python embr-script))))
+    (setq embr--process
+          (make-process
+           :name "embr"
+           :command command
+           :connection-type 'pipe
+           :noquery t
+           :stderr (get-buffer-create "*embr-stderr*")
+           :filter #'embr--process-filter
+           :sentinel #'embr--process-sentinel))))
 
 (defun embr--process-filter (_proc output)
   "Handle OUTPUT from the daemon process."
@@ -1045,6 +1140,14 @@ If the daemon is already running, just navigate to the new URL."
           (embr-setup-or-update)
           (error "embr: Setup started in *embr-setup* buffer. Run M-x embr-browse again when it finishes"))
       (error "embr: Run M-x embr-setup-or-update first")))
+  ;; Check if booster is enabled but not compiled.
+  (when (embr--booster-needed-p)
+    (if (y-or-n-p "embr: Booster enabled but not compiled. Compile now? ")
+        (progn
+          (embr-build-booster)
+          (error "embr: Compilation started in *embr-setup* buffer. Run M-x embr-browse again when it finishes"))
+      (message "embr: Booster not found, falling back to direct mode")
+      (setq embr-booster nil)))
   ;; Create buffer if needed.
   (unless (buffer-live-p embr--buffer)
     (setq embr--buffer (generate-new-buffer "*embr*"))

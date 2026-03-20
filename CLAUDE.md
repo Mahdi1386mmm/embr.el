@@ -44,7 +44,70 @@ Never stage, commit, or push unless explicitly told to do so. Any such instructi
 
 ## Validation
 
-After modifying code, always run `make test` before finishing. Do not consider the task complete if any check fails.
+After modifying code, always run `make test` before finishing. This runs `make checkparens` (balanced parens), `make bytecompile` (byte-compilation), `make checkpy` (Python syntax), and `make shellcheck` (shell scripts). Do not consider the task complete if any check fails.
+
+## Emacs Lisp Standards
+
+All Elisp code must follow GNU Coding Standards and Emacs Lisp conventions.
+
+Full references:
+- GNU Coding Standards: https://www.gnu.org/prep/standards/
+- Emacs Lisp Tips and Conventions: https://www.gnu.org/software/emacs/manual/html_node/elisp/Tips.html
+
+### Naming Conventions
+
+- All global symbols use the package prefix `embr-` (public) or `embr--` (private)
+- Predicates: one-word names end in `p`, multi-word in `-p`
+- Boolean variables: use `-flag` suffix or `is-foo`, not `-p` (unless bound to a predicate function)
+- Function-storing variables: end in `-function`; hook variables: follow hook naming conventions
+- File/directory variables: use `file`, `file-name`, or `directory`, never `path` (reserved for search paths)
+- No `*var*` naming convention; that is not used in Emacs Lisp
+
+### Coding Conventions
+
+- Lexical binding required
+- Use `require` for hard dependencies; `(eval-when-compile (require 'bar))` for compile-time-only macro dependencies
+- Use `cl-lib`, never the deprecated `cl` library
+- Never use `defadvice`, `eval-after-load`, or `with-eval-after-load`
+- Loading a package must not change editing behavior; require explicit enable/invoke commands
+- Use default indentation; never put closing parens on their own line
+- Remove all trailing whitespace; use `?\s` for space character (not `? `)
+
+### Documentation Strings
+
+- Every public function and variable needs a docstring
+- First line: complete sentence, imperative voice, capital letter, ends with period, max 74 chars
+- Function docstrings: "Return X." not "Returns X." Active voice, present tense.
+- Argument references: UPPERCASE (e.g., "Evaluate FORM and return its value.")
+- Symbol references: lowercase with backtick-quote (e.g., `` `lambda' ``) -- except t and nil unquoted
+- Predicates: start with "Return t if"
+- Boolean variables: start with "Non-nil means"
+- User options: use `defcustom`
+
+### Comment Conventions
+
+- `;` -- right-aligned inline comments on code lines
+- `;;` -- indented to code level, describes following code or program state
+- `;;;` -- left margin, section headings (Outline mode)
+
+### Performance and Programming Tips
+
+- Prefer iteration over recursion (function calls are slow in Elisp)
+- Prefer lists over vectors unless random access on large tables is needed
+- Use `memq`, `member`, `assq`, `assoc` over manual iteration
+- Use `forward-line` not `next-line`/`previous-line`
+- Don't call `beginning-of-buffer`, `end-of-buffer`, `replace-string`, `replace-regexp`, `insert-file`, `insert-buffer` in programs
+- Use `message` for echo area output, not `princ`
+- Use `error` or `signal` for error conditions (not `message`, `throw`, `sleep-for`, `beep`)
+- Error messages: capital letter, no trailing period. Optionally prefix with `symbol-name:`
+- Minibuffer prompts: questions end with `?`, defaults shown as `(default VALUE)`
+- Progress messages: `"Operating..."` then `"Operating...done"` (no spaces around ellipsis)
+
+### Compiler Warnings
+
+- Use `(defvar foo)` to suppress free variable warnings
+- Use `declare-function` for functions known to be defined elsewhere
+- Use `with-no-warnings` as last resort for intentional non-standard usage
 
 ## Working with the Code
 

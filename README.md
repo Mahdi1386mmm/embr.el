@@ -19,7 +19,7 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
   :defer t
   :ensure (:host github
            :repo "emacs-os/embr.el"
-           :files ("*.el" "*.py" "*.sh" "libexec/"))
+           :files ("*.el" "*.py" "*.sh" "libexec/*.c"))
   :config
   (setq embr-python "~/.local/share/embr/.venv/bin/python" ;; auto-detected
         embr-script (expand-file-name "embr.py" embr--directory) ;; auto-detected
@@ -56,7 +56,7 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
   :defer t
   :straight (:host github
              :repo "emacs-os/embr.el"
-             :files ("*.el" "*.py" "*.sh" "libexec/"))
+             :files ("*.el" "*.py" "*.sh" "libexec/*.c"))
   :config
   (setq embr-python "~/.local/share/embr/.venv/bin/python" ;; auto-detected
         embr-script (expand-file-name "embr.py" embr--directory) ;; auto-detected
@@ -322,7 +322,7 @@ Unknown. Let us know.
 PLAN-1 (PLAN.md) -- DONE 0.20
 Builds the baseline responsiveness system: input-first scheduling, adaptive capture behavior, hover shedding, and measurable perf reporting. It improves interaction latency consistency and reduces freeze events while establishing objective pass/fail gates.
 
-PLAN-2 (PLAN-2.md)
+PLAN-2 (PLAN-2.md) -- DONE 0.30
 Adds a C-based embr-booster transport layer to prioritize control/input traffic over frame churn with bounded queues and backpressure policy. It improves responsiveness under load by reducing pipe contention and head-of-line blocking.
 
 PLAN-3 (PLAN-3.md)
