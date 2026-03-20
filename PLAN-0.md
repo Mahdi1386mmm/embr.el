@@ -31,6 +31,8 @@ In scope:
 
 - `embr.py`: browser launch/runtime migration from Camoufox-specific API to CloakBrowser-compatible Chromium flow.
 - `setup.sh`: installer changes to provision CloakBrowser runtime and dependencies.
+- `uninstall.sh`: uninstall changes to remove CloakBrowser artifacts and prompts.
+- `embr.el` lifecycle functions: management command updates for setup/uninstall/info and booster management flow.
 - `README.md`: docs updates for engine, setup, and defaults.
 - Compatibility preservation for modern performance flags listed in Section 6.
 
@@ -137,20 +139,30 @@ W1. Engine launch migration (`embr.py`)
 - Add CloakBrowser-compatible browser/context/page startup flow.
 - Ensure viewport and screen sizing still honor Emacs init params.
 
-W2. Setup/install migration (`setup.sh`)
+W2. Setup/install/uninstall script migration (`setup.sh`, `uninstall.sh`)
 
 - Replace Camoufox install/fetch steps with CloakBrowser install/bootstrap steps.
 - Keep atomic venv swap and rollback behavior.
 - Keep blocklist download and optional booster build behavior.
+- Update uninstall behavior and prompts for CloakBrowser cache/data locations.
+- Preserve safe confirmation flow and clear output messages for removals.
 
-W3. Documentation sync (`README.md`)
+W3. Emacs management function sync (`embr.el`)
+
+- Update `embr-setup-or-update` messaging to reflect CloakBrowser install/update path.
+- Update `embr-uninstall` prompts and optional browser-cache deletion wording.
+- Update `embr-info` reported browser cache/profile paths and labels.
+- Keep `embr-build-booster` flow unchanged except for any engine-specific text references.
+
+W4. Documentation sync (`README.md`)
 
 - Replace Camoufox references with CloakBrowser references.
 - Update install/runtime wording.
 - Ensure `use-package` blocks and config tables remain synchronized with actual `defcustom` defaults.
 - Reflect caret-hack disabled migration stance.
+- Ensure setup/uninstall command descriptions match actual script/function behavior.
 
-W4. Compatibility and fallback controls
+W5. Compatibility and fallback controls
 
 - Add explicit startup logging of active engine and booster mode.
 - Keep clear fallback/error messages for missing runtime dependencies.
@@ -177,6 +189,9 @@ Core checks:
 - no hangs/deadlocks,
 - no protocol parse failures,
 - expected keybinding behavior.
+- `M-x embr-setup-or-update` invokes updated `setup.sh` successfully.
+- `M-x embr-uninstall` invokes updated `uninstall.sh` with correct prompts/targets.
+- `M-x embr-info` reports correct engine-related cache/profile locations.
 
 ## 9. Risks and Mitigations
 
@@ -209,5 +224,6 @@ Mitigation:
 - Part 2 completed and reviewed at Feedback Gate 2.
 - Modern flag compatibility contract preserved.
 - `make test` passes at each implementation checkpoint.
+- Setup and uninstall scripts are migrated and validated end-to-end.
+- Emacs management functions are updated to match script behavior and paths.
 - README/setup instructions reflect the migrated engine accurately.
-

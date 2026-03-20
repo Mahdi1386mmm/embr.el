@@ -1,4 +1,4 @@
-;;; embr.el --- Browse the web with headless Firefox in Emacs  -*- lexical-binding: t; -*-
+;;; embr.el --- Browse the web with headless Chromium in Emacs  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 emacs-os
 
@@ -22,16 +22,16 @@
 
 ;;; Commentary:
 
-;; embr runs a headless Firefox (via Camoufox/Playwright) and displays
-;; screenshots in an Emacs buffer.  Clicks, keystrokes, and scroll
-;; events are forwarded to the browser.  The daemon streams JPEG
-;; frames via a temp file on disk, giving live visual feedback.
+;; embr runs a headless Chromium (via CloakBrowser/Playwright) and
+;; displays screenshots in an Emacs buffer.  Clicks, keystrokes, and
+;; scroll events are forwarded to the browser.  The daemon streams
+;; JPEG frames via a temp file on disk, giving live visual feedback.
 ;;
-;; The Python daemon (`embr.py') controls the browser through Camoufox,
-;; a Playwright-compatible anti-detect Firefox fork.  Communication
-;; uses JSON lines over stdin/stdout.  An optional C proxy
-;; (`embr-booster') can sit between Emacs and the daemon for priority
-;; scheduling and message coalescing under load.
+;; The Python daemon (`embr.py') controls the browser through
+;; CloakBrowser, a stealth Chromium with source-level fingerprint
+;; patches.  Communication uses JSON lines over stdin/stdout.  An
+;; optional C proxy (`embr-booster') can sit between Emacs and the
+;; daemon for priority scheduling and message coalescing under load.
 
 ;;; Code:
 
@@ -40,7 +40,7 @@
 ;; ── Customization ──────────────────────────────────────────────────
 
 (defgroup embr nil
-  "Headless Firefox browser for Emacs."
+  "Headless Chromium browser for Emacs."
   :group 'web
   :prefix "embr-")
 
@@ -106,7 +106,7 @@ during video playback) at the cost of hover responsiveness."
 %s is replaced with the current page URL (shell-quoted).
 Examples:
   \"yt-dlp -o - %s | mpv -\"                — stream via yt-dlp into mpv (default)
-  \"yt-dlp --cookies-from-browser firefox:~/.local/share/embr/firefox-profile -o - %s | mpv -\"
+  \"yt-dlp --cookies-from-browser chromium:~/.local/share/embr/chromium-profile -o - %s | mpv -\"
     — same but with embr's cookies (for age-restricted content)
   \"mpv %s\"       — open directly in mpv
   \"chromium %s\"  — open in Chromium"
@@ -136,12 +136,12 @@ Useful for sites that rely on press-and-hold interactions."
 (defcustom embr-color-scheme 'dark
   "Browser color scheme preference.
 Controls `prefers-color-scheme' CSS media query.  Set to nil to let
-Camoufox choose from its fingerprint profile."
+CloakBrowser choose from its fingerprint profile."
   :type '(choice (const :tag "Dark" dark)
                  (const :tag "Light" light)
-                 (const :tag "Auto (Camoufox default)" nil)))
+                 (const :tag "Auto (CloakBrowser default)" nil)))
 
-(defcustom embr-dom-caret-hack t
+(defcustom embr-dom-caret-hack nil
   "Whether to inject a fake DOM caret in focused text fields.
 CDP screenshots do not capture the native browser caret, so embr
 injects a thin DOM element that tracks the cursor position.  Set
@@ -226,8 +226,12 @@ Example: (\"--log-level\" \"debug\" \"--frame-forward-max-hz\" \"30\")"
 ;; ── Setup & management ─────────────────────────────────────────────
 
 (defun embr--setup-needed-p ()
-  "Return non-nil if setup.sh needs to be run."
-  (not (file-exists-p embr-python)))
+  "Return non-nil if setup.sh needs to be run.
+Checks that both the venv Python and the cloakbrowser package exist."
+  (or (not (file-exists-p embr-python))
+      (not (zerop
+            (call-process embr-python nil nil nil
+                          "-c" "import cloakbrowser")))))
 
 (defun embr--booster-needed-p ()
   "Return non-nil if booster is enabled but binary is missing."
@@ -235,7 +239,7 @@ Example: (\"--log-level\" \"debug\" \"--frame-forward-max-hz\" \"30\")"
 
 ;;;###autoload
 (defun embr-setup-or-update ()
-  "Run setup.sh to install or update the Python venv, Playwright, Firefox, and ad blocklist.
+  "Run setup.sh to install or update the Python venv, CloakBrowser, and ad blocklist.
 Safe to run at any time — rebuilds in a temp venv and swaps atomically."
   (interactive)
   (let ((setup-script (expand-file-name "setup.sh" embr--directory)))
@@ -291,7 +295,7 @@ Requires a C compiler (cc or gcc).  The binary is written to
 
 ;;;###autoload
 (defun embr-uninstall ()
-  "Remove the Python venv, Playwright browsers, and browser profile.
+  "Remove the Python venv, CloakBrowser, and browser profile.
 This does NOT remove the Emacs package itself — use your package manager for that."
   (interactive)
   (let ((script (expand-file-name "uninstall.sh" embr--directory)))
@@ -303,7 +307,7 @@ This does NOT remove the Emacs package itself — use your package manager for t
       (insert (format "Running uninstall.sh in %s ...\n\n" embr--directory))
       ;; Run with yes piped to stdin to auto-confirm (user already confirmed via M-x).
       (when (y-or-n-p "Remove Python venv and browser profile? ")
-        (let* ((also-browsers (y-or-n-p "Also delete Camoufox's browser cache (~/.cache/camoufox)? "))
+        (let* ((also-browsers (y-or-n-p "Also delete CloakBrowser's browser cache (~/.cache/cloakbrowser)? "))
                (input (concat "y\n" (if also-browsers "y\n" "n\n")))
                (proc (start-process "embr-uninstall" buf "bash" "-c"
                                      (format "echo %s | bash %s"
@@ -322,9 +326,10 @@ This does NOT remove the Emacs package itself — use your package manager for t
   "Show diagnostic info about the embr installation."
   (interactive)
   (let ((venv-dir (expand-file-name ".venv" embr--data-dir))
-        (browsers-dir (expand-file-name "camoufox" (or (getenv "XDG_CACHE_HOME")
-                                                        (expand-file-name ".cache" "~"))))
-        (profile-dir (expand-file-name "firefox-profile" embr--data-dir)))
+        (browsers-dir (expand-file-name "cloakbrowser"
+                                         (or (getenv "XDG_CACHE_HOME")
+                                             (expand-file-name ".cache" "~"))))
+        (profile-dir (expand-file-name "chromium-profile" embr--data-dir)))
     (message "embr installation:
   Source:     %s
   Python:     %s (%s)

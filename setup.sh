@@ -24,10 +24,8 @@ trap cleanup EXIT
 # Build everything in a temp venv.
 rm -rf "$TMP_VENV"
 python3 -m venv "$TMP_VENV"
-# "$TMP_VENV/bin/pip" install playwright
-# "$TMP_VENV/bin/python" -m playwright install firefox
-"$TMP_VENV/bin/pip" install "camoufox[geoip]"
-"$TMP_VENV/bin/python" -m camoufox fetch
+"$TMP_VENV/bin/pip" install "cloakbrowser[geoip]"
+"$TMP_VENV/bin/python" -m cloakbrowser install
 
 # Swap atomically.
 if [ -d "$VENV_DIR" ]; then
@@ -64,4 +62,4 @@ if [ -f "$BOOSTER_SRC" ]; then
     fi
 fi
 
-echo "Setup complete. Camoufox is ready."
+echo "Setup complete. CloakBrowser is ready."

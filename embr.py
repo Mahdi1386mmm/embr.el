@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""embr daemon: headless Firefox controlled via JSON over stdin/stdout."""
+"""embr daemon: headless Chromium controlled via JSON over stdin/stdout."""
 
 import asyncio
 import json
@@ -71,8 +71,8 @@ def load_blocklist():
 
 async def main():
     from playwright.async_api import async_playwright
-    from camoufox.async_api import AsyncNewBrowser
-    from browserforge.fingerprints import Screen
+    from cloakbrowser.download import ensure_binary
+    from cloakbrowser.config import IGNORE_DEFAULT_ARGS, get_default_stealth_args
     pw = await async_playwright().start()
     perf = PerfLog()
     context = None
@@ -100,8 +100,12 @@ async def main():
     adapt_cooldown = 0
     last_rendered_frame_id = 0
 
-    user_data_dir = Path.home() / ".local" / "share" / "embr" / "firefox-profile"
+    user_data_dir = Path.home() / ".local" / "share" / "embr" / "chromium-profile"
     user_data_dir.mkdir(parents=True, exist_ok=True)
+
+    booster_active = os.environ.get("EMBR_FRAME_FD") == "1"
+    print(f"embr: engine=cloakbrowser booster={'on' if booster_active else 'off'}",
+          file=sys.stderr)
 
     # Frame notification routing:
     # - EMBR_FRAME_FD=1 (set by booster): use fd 3 as out-of-band frame pipe.
@@ -292,29 +296,22 @@ async def main():
             height = params.get("height", 720)
             sw = params.get("screen_width", 1920)
             sh = params.get("screen_height", 1080)
-            browser_opts = dict(
-                persistent_context=True,
+            binary_path = ensure_binary()
+            chrome_args = get_default_stealth_args()
+            context_opts = dict(
                 user_data_dir=str(user_data_dir),
+                executable_path=binary_path,
                 headless=True,
-                enable_cache=True,
-                window=(width, height),
-                screen=Screen(min_width=sw, max_width=sw,
-                              min_height=sh, max_height=sh),
-                os="linux",
+                args=chrome_args,
+                ignore_default_args=IGNORE_DEFAULT_ARGS + ["--mute-audio"],
+                viewport={"width": width, "height": height},
+                screen={"width": sw, "height": sh},
                 accept_downloads=False,
             )
-            prefs = {}
             color_scheme = params.get("color_scheme")
             if color_scheme:
-                browser_opts["color_scheme"] = color_scheme
-                # Reinforce via Firefox prefs in case Playwright's context-level
-                # setting is overridden by Camoufox's fingerprint.
-                prefs["layout.css.prefers-color-scheme.content-override"] = (
-                    1 if color_scheme == "light" else 0)
-                prefs["ui.systemUsesDarkTheme"] = (
-                    0 if color_scheme == "light" else 1)
-            browser_opts["firefox_user_prefs"] = prefs
-            context = await AsyncNewBrowser(pw, **browser_opts)
+                context_opts["color_scheme"] = color_scheme
+            context = await pw.chromium.launch_persistent_context(**context_opts)
             # Ad blocking via request interception.
             blocked = load_blocklist()
             if blocked:
@@ -431,8 +428,6 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
                     await page.evaluate("() => {" + _CARET_BODY + "}")
                 except Exception:
                     pass
-            # Force our exact viewport size (camoufox may derive a different one from its fingerprint).
-            await page.set_viewport_size({"width": width, "height": height})
             loop_task = asyncio.create_task(screenshot_loop())
             return {"ok": True, "frame_path": FRAME_PATH}
 

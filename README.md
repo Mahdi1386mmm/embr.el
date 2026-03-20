@@ -1,7 +1,7 @@
 ## embr.el
 **Em**acs **Br**owser
 
-Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.com/) is the renderer.
+Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakbrowser.dev) is the renderer.
 
 ![embr screenshot](assets/screenshot.png)
 
@@ -33,7 +33,7 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
         embr-click-method 'immediate
         embr-scroll-method 'instant
         embr-scroll-step 120
-        embr-dom-caret-hack t
+        embr-dom-caret-hack nil
         embr-perf-log nil
         embr-input-priority-window-ms 35
         embr-adaptive-capture t
@@ -67,7 +67,7 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
         embr-click-method 'immediate
         embr-scroll-method 'instant
         embr-scroll-step 120
-        embr-dom-caret-hack t
+        embr-dom-caret-hack nil
         embr-perf-log nil
         embr-input-priority-window-ms 35
         embr-adaptive-capture t
@@ -89,7 +89,7 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
 
 ## Setup
 
-After installing, run `M-x embr-setup-or-update` to create the Python venv and download Camoufox (a Playwright-compatible anti-detect Firefox fork with uBlock Origin built in).
+After installing, run `M-x embr-setup-or-update` to create the Python venv and download CloakBrowser (a stealth Chromium with source-level fingerprint patches).
 
 If you skip this step, `M-x embr-browse` will detect the missing venv and offer to run setup for you automatically.
 
@@ -99,23 +99,37 @@ All management is done from Emacs, no terminal needed.
 
 | Command | Description |
 |---------|-------------|
-| `M-x embr-setup-or-update` | Install or update venv + Camoufox + ad blocklist + compile booster (runs `setup.sh`) |
+| `M-x embr-setup-or-update` | Install or update venv + CloakBrowser + ad blocklist + compile booster (runs `setup.sh`) |
 | `M-x embr-build-booster` | Compile the embr-booster C proxy (requires a C compiler) |
-| `M-x embr-uninstall` | Remove venv, browsers, browser profile, and booster binary (runs `uninstall.sh`) |
+| `M-x embr-uninstall` | Remove venv, browser profile, and booster binary; optionally delete browser cache (runs `uninstall.sh`) |
 | `M-x embr-info` | Show diagnostic info about the installation |
 
 The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's always safe to re-run for both first install and updates.
 
 ### Where state is stored
 
-| What | Path |
-|------|------|
-| Python venv | `~/.local/share/embr/.venv/` |
-| Booster binary | `~/.local/share/embr/embr-booster` |
-| Camoufox browser | `~/.cache/camoufox/` |
-| Cookies & sessions | `~/.local/share/embr/firefox-profile/` |
+| What | Path (0.40+) | Path (0.30) |
+|------|--------------|-------------|
+| Python venv | `~/.local/share/embr/.venv/` | same |
+| Booster binary | `~/.local/share/embr/embr-booster` | same |
+| Browser binary | `~/.cache/cloakbrowser/` | `~/.cache/camoufox/` |
+| Cookies & sessions | `~/.local/share/embr/chromium-profile/` | `~/.local/share/embr/firefox-profile/` |
 
-`M-x embr-uninstall` cleans up all of the above.
+`M-x embr-uninstall` removes the venv, profile, and booster; browser cache deletion is offered as an optional prompt.
+
+### Migrating from 0.30 to 0.40
+
+Version 0.40 replaces the browser engine (Camoufox/Firefox → CloakBrowser/Chromium). A clean install is recommended:
+
+1. On 0.30, run `M-x embr-uninstall` to remove the old venv, browser cache, and profile.
+2. Remove the package from Elpaca/straight (delete from your config, restart Emacs, let it re-clone).
+3. Install 0.40 fresh and run `M-x embr-setup-or-update`.
+
+If you skipped step 1, you can manually remove leftover 0.30 state:
+
+```sh
+rm -rf ~/.local/share/embr ~/.cache/camoufox
+```
 
 ## Configuration
 
@@ -130,12 +144,12 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-default-height` | integer | `720` | Viewport height in pixels |
 | `embr-screen-width` | integer | `1920` | Screen width reported to websites (should be >= viewport) |
 | `embr-screen-height` | integer | `1080` | Screen height reported to websites (should be >= viewport) |
-| `embr-color-scheme` | symbol/nil | `'dark` | `'dark`, `'light`, or `nil` to let Camoufox choose. Controls `prefers-color-scheme`. |
+| `embr-color-scheme` | symbol/nil | `'dark` | `'dark`, `'light`, or `nil` to let CloakBrowser choose. Controls `prefers-color-scheme`. |
 | `embr-search-engine` | symbol/string | `'google` | `'google`, `'brave`, `'duckduckgo`, or custom URL with `%s` |
 | `embr-click-method` | symbol | `'immediate` | `'atomic` defers mousedown until drag detected, better iframe compat. `'immediate` sends mousedown instantly, for press-and-hold sites. |
 | `embr-scroll-method` | symbol | `'instant` | `'smooth` scrolls with CSS animation. `'instant` scrolls instantly, line-by-line feel. |
 | `embr-scroll-step` | integer | `120` | Scroll distance in pixels per wheel notch |
-| `embr-dom-caret-hack` | boolean | `t` | Inject a fake DOM caret in focused text fields. CDP screenshots don't capture the native caret. |
+| `embr-dom-caret-hack` | boolean | `nil` | Inject a fake DOM caret in focused text fields. CDP screenshots don't capture the native caret. |
 | `embr-perf-log` | boolean | `nil` | Write JSONL perf events to `/tmp/embr-perf.jsonl`. Analyze with `tools/embr-perf-report.py`. |
 | `embr-input-priority-window-ms` | integer | `35` | Milliseconds to suppress frame capture after interactive input. Frees CDP pipe for input commands. 0 to disable. |
 | `embr-adaptive-capture` | boolean | `t` | Auto-tune FPS and JPEG quality based on capture cost. Lowers when over budget, recovers when stable. |
@@ -186,7 +200,7 @@ The top-level keybindings below translate familiar Emacs motion keys into their 
 
 ### Browser commands
 
-Browser commands use the `C-c` prefix — eww-inspired commands, just behind a prefix instead of on top-level keys. This gives a more natural Firefox typing experience while keeping power tools a combo away.
+Browser commands use the `C-c` prefix — eww-inspired commands, just behind a prefix instead of on top-level keys. This gives a more natural browser typing experience while keeping power tools a combo away.
 
 | Key | Action |
 |-----|--------|
@@ -213,18 +227,15 @@ Standard Emacs bookmarks work: `C-x r m` to save, `C-x r b` to jump.
 
 ## Ad Blocking
 
-Two layers of ad blocking:
+**Domain-level blocklist** — using the [StevenBlack/hosts](https://github.com/StevenBlack/hosts) list (~82K ad and tracker domains), requests to blocked domains are intercepted and killed before they hit the network.
 
-1. **uBlock Origin** — bundled via [Camoufox](https://camoufox.com/), providing full cosmetic filtering, element hiding, and script blocking out of the box.
-2. **Domain-level blocklist** — using the [StevenBlack/hosts](https://github.com/StevenBlack/hosts) list (~82K ad and tracker domains), requests to blocked domains are intercepted and killed before they hit the network.
-
-The blocklist is downloaded automatically by `setup.sh` and refreshed every time you run `M-x embr-setup-or-update`. uBlock Origin requires no configuration.
+The blocklist is downloaded automatically by `setup.sh` and refreshed every time you run `M-x embr-setup-or-update`.
 
 ## How It Works
 
-Emacs spawns a Python subprocess (`embr.py`) that controls headless Firefox through [Camoufox](https://camoufox.com/) (a Playwright-compatible anti-detect Firefox fork). They communicate via JSON lines over stdin/stdout. The daemon streams JPEG screenshots via a temp file on disk, giving live visual feedback.
+Emacs spawns a Python subprocess (`embr.py`) that controls headless Chromium through [CloakBrowser](https://cloakbrowser.dev) (a stealth Chromium with source-level fingerprint patches). They communicate via JSON lines over stdin/stdout. The daemon streams JPEG screenshots via a temp file on disk, giving live visual feedback.
 
-Browser sessions persist across restarts. Cookies and login state are stored in `~/.local/share/embr/firefox-profile/`.
+Browser sessions persist across restarts. Cookies and login state are stored in `~/.local/share/embr/chromium-profile/`.
 
 ### Avoiding CDP deadlocks
 
@@ -272,7 +283,7 @@ The booster provides:
 - **Frame rate limiting**: caps frame forwarding under pressure
 - **Backpressure**: bounded queues prevent unbounded memory growth
 
-The booster is compiled automatically by `setup.sh` if a C compiler is available, and `embr-booster` defaults to `t`. If the binary is missing when you launch `embr-browse`, Emacs will offer to compile it for you. The booster is protocol-transparent — same JSON lines, just reordered and coalesced. If compilation isn't possible, embr falls back to direct mode with a warning.
+The booster is compiled automatically by `setup.sh` if a C compiler is available. If the binary is missing when you launch `embr-browse` with `embr-booster` set to `t`, Emacs will offer to compile it for you. The booster is protocol-transparent — same JSON lines, just reordered and coalesced. If compilation isn't possible, embr falls back to direct mode with a warning.
 
 **Known side effect:** During video playback, clicks may not register if the mouse is moving. The hover timer sends CDP `page.mouse.move()` at `embr-hover-rate` Hz, which competes for pipe bandwidth with the click's `page.evaluate()` call. Workaround: hold the mouse still, then click. This tradeoff exists to prevent CDP deadlocks that would otherwise freeze all input indefinitely. Improving this is ongoing.
 
@@ -280,11 +291,11 @@ The booster is compiled automatically by `setup.sh` if a C compiler is available
 
 ### Does audio/video work?
 
-**Video playback works.** Frame rate depends on `embr-fps` (default 30). YouTube may throttle unauthenticated sessions.
+**Video playback works.** Frame rate depends on `embr-fps` (default 60). YouTube may throttle unauthenticated sessions.
 
-**Audio playback works.** Headless Firefox routes audio through PulseAudio/PipeWire.
+**Audio playback works.** Headless Chromium routes audio through PulseAudio/PipeWire.
 
-**Mic, camera, and screen sharing do not work.** Headless Firefox has no access to input devices.
+**Mic, camera, and screen sharing do not work.** Headless Chromium has no access to input devices.
 
 ### Will you add vim-like modal keybindings (like Vimium)?
 
