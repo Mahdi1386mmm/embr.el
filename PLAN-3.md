@@ -1,392 +1,273 @@
-# PLAN-3: Post-Booster Rendering and Transport Overhaul
+# PLAN-3: Camoufox Screencast Data Plane
 
 Document status: implementation specification
 Last updated: 2026-03-20
 Owner: `embr` maintainers
 Audience: core implementers and performance agents
 
-## 1. Program Intent
+## 1. Executive Decision
 
-`PLAN-2` commits to a full booster program. `PLAN-3` is the next stage: reduce or eliminate the architectural ceilings caused by full-frame screenshot transport and repeated decode/redraw work.
+Single goal:
 
-This plan assumes booster work exists and uses it as the control-plane foundation.
+- move frame pixels off per-frame screenshot polling to Camoufox/Juggler screencast push.
 
-## 2. Product Outcome
+This is the highest-impact performance plan, attacking the capture-side bottleneck before PLAN-5 canvas work.
 
-Make `embr` feel near-native for interactive browsing while maintaining acceptable video usability.
+## 2. Scope (Pruned)
 
-Priority order:
+PLAN-3 focuses on item 2 only:
 
-1. Input-to-visible-response latency.
-2. Frame freshness.
-3. Visual smoothness.
-4. CPU and power efficiency.
+- stop relying on per-frame screenshot polling for pixel transport,
+- keep existing control/input semantics,
+- use Camoufox/Juggler screencast push with fallback to screenshot mode.
 
-## 3. Core Hypothesis
+Scope gate (hard):
 
-Past improvements mainly optimize scheduling around the existing full-frame path. The next large gains require reducing data volume and decode churn.
+- Any new work not directly required for item 2 is out of scope for PLAN-3.
+- If a behavior/tuning already exists in-tree, keep it as-is.
+- Do not add new tuning tracks in PLAN-3 for scheduler/adaptive/hover/canvas/engine migration.
 
-Biggest leverage points:
+### 2.1 Item 2: "Stop using screenshot RPC for frame pixels" (primary focus)
 
-- fewer full-frame captures,
-- smaller frame payloads,
-- decoupled control and frame transport,
-- lower Emacs-side redraw cost.
+This is feasible with Camoufox internals:
 
-## 4. Scope
+- Juggler protocol contains `Page.startScreencast`, `Page.stopScreencast`, `Page.screencastFrameAck`, and `Page.screencastFrame`.
+- Camoufox Juggler target code uses `nsIScreencastService` for pushed frames.
 
-In scope:
+But current Python Playwright client cannot call it directly:
 
-- capture policy redesign,
-- partial update pipeline,
-- binary frame transport,
-- shared memory transport (Linux-first),
-- Emacs render-path optimization,
-- benchmark/replay harness for repeatable evaluation.
+- `BrowserContext.new_cdp_session()` is Chromium-only.
+- direct channel call to `startScreencast` currently fails with unknown protocol scheme.
 
-Out of scope:
+Therefore this plan requires a small Playwright driver protocol/dispatcher patch layer.
 
-- replacing Emacs as UI host,
-- replacing Camoufox in this plan,
-- browser feature expansion unrelated to responsiveness.
+## 3. Non-Negotiable Constraints
 
-## 5. Non-Goals
+- Camoufox remains the browser engine.
+- No Camoufox source compilation.
+- No Camoufox forking.
+- Existing keyboard/mouse/navigation command semantics must remain unchanged.
+- Existing screenshot path remains available as hard fallback.
+- No user-visible breakage on stock Emacs.
+- No requirement to land PLAN-5 (canvas) first.
+- Runtime-only tunables are acceptable as supporting tweaks, but they are not the primary mechanism of this plan.
 
-- perfect parity with native Firefox compositor,
-- support for every OS in first pass of new transport,
-- broad UX redesign.
+## 4. Architecture Decision
 
-## 6. Architecture Tracks
+Control/data split:
 
-`PLAN-3` is a multi-track program. All tracks are mandatory unless superseded by an approved architecture decision record (ADR).
+- control plane (unchanged): current JSON command path for input/navigation.
+- data plane (new): pushed screencast frames from Camoufox via patched Playwright driver events.
 
-### 6.1 Track A: Activity-Driven Capture Policy
+Fallback:
 
-Goal:
+- if screencast capability/protocol patch is absent or fails, daemon automatically reverts to `page.screenshot()` path.
 
-- Capture only when likely to improve visible output.
+## 5. Implementation Requirements
 
-Requirements:
+## 5.1 Playwright Driver Micro-Patch (required)
 
-- Introduce activity states (`interactive`, `watch`, `idle`, `background`).
-- Drive capture cadence by state and recent input/DOM activity.
-- Add short suppression windows after high-priority input.
-- Provide deterministic state transition telemetry.
+Patch local Playwright driver package used by `embr` to expose screencast to Python client.
 
-### 6.2 Track B: Partial Update Pipeline (Dirty Regions)
+Required protocol additions:
 
-Goal:
+- page command to start screencast (embr-private name preferred),
+- page command to stop screencast,
+- page event carrying frame payload + dimensions + monotonic-ish timestamp.
 
-- Replace full-frame-only updates with region/tile updates when feasible.
+Required server dispatcher behavior:
 
-Requirements:
+- bridge to existing internal `page.screencast.setOptions(...)` and stop path,
+- forward `Page.Events.ScreencastFrame` to client event,
+- keep behavior isolated (no impact unless enabled).
 
-- Define tile grid or rect stream format.
-- Send only changed tiles/rects under normal interaction.
-- Fallback to full-frame keyframes at bounded intervals.
-- Ensure visual correctness under scroll, animation, and video.
+Required patching policy:
 
-### 6.3 Track C: Binary Frame Channel
+- version/checksum guard in setup flow,
+- patch must fail closed (disable screencast mode, keep screenshot mode),
+- clear log when patch is skipped due version drift.
 
-Goal:
+## 5.2 Daemon (`embr.py`) Changes (required)
 
-- Move frame payloads off JSON lines.
+Add frame source selection:
 
-Requirements:
+- `frame_source=auto|screenshot|screencast`.
 
-- Keep JSON lines as control protocol.
-- Add dedicated binary framing channel for image/tile data.
-- Include sequence IDs and timestamps in frame metadata.
-- Preserve graceful fallback to legacy full-frame mode.
+Mode rules:
 
-### 6.4 Track D: Shared Memory Transport (Linux-first)
+- `auto`: try screencast probe first, fallback to screenshot.
+- `screenshot`: current behavior exactly.
+- `screencast`: require screencast; hard error if unavailable.
 
-Goal:
+Screencast mode behavior:
 
-- Remove large frame payloads from pipe transport.
+- register event listener for pushed frames,
+- keep queue depth at 1 (latest frame wins),
+- emit same frame metadata contract to Emacs (`frame`, `frame_id`, `capture_done_mono_ms`, etc.),
+- reuse existing scheduler/adaptive/hover behavior without expanding those systems in this plan.
 
-Requirements:
+Failure behavior:
 
-- Implement shm ring buffer for frame/tile payloads.
-- Use lightweight control notifications (pipe/eventfd/json control plane).
-- Ensure buffer overrun handling and sequence-gap detection.
-- Provide fallback when shm unavailable.
+- on repeated screencast errors/disconnects, auto-fallback to screenshot path in `auto`,
+- in forced `screencast` mode, return explicit error and stop stream cleanly.
 
-### 6.5 Track E: Emacs Render Path Optimization
+## 5.3 Emacs (`embr.el`) Changes (required)
 
-Goal:
+Add user control:
 
-- Reduce redraw and decode overhead in Emacs.
+- `embr-frame-source` with values `auto`, `screenshot`, `screencast`.
 
-Requirements:
+Init payload must include selected frame source.
 
-- Avoid unnecessary buffer erase/reinsert cycles when possible.
-- Drop stale frame/tile generations before decode.
-- Prefer latest generation rendering with explicit generation IDs.
-- Add render telemetry (`decode_ms`, `render_ms`, dropped generations).
+No rendering-path rewrite is required in this plan:
 
-### 6.6 Track F: Deterministic Replay Harness
+- continue using current JPEG decode/display path in Emacs,
+- PLAN-5 remains responsible for canvas rendering acceleration.
 
-Goal:
+## 5.4 Setup and Tooling Changes (required)
 
-- Benchmark with repeatable mixed input + page activity traces.
+`setup.sh` (or helper script) must:
 
-Requirements:
+- detect installed Playwright version in embr venv,
+- apply/remove driver patch deterministically,
+- report applied patch version in setup output.
 
-- Record/replay input traces and scenario metadata.
-- Produce machine-readable reports with p50/p95/p99 metrics.
-- Compare candidate vs baseline with fixed scenario definitions.
+Add one diagnostic command/log surface:
 
-## 7. Acceptance SLOs (Program-Level)
+- print effective frame source (`screenshot` vs `screencast`) at startup.
 
-All MUST gates must pass on reference hardware and one secondary machine class.
+## 6. Milestones
 
-### 7.1 Input Responsiveness MUST
-
-Under mixed high-load scenario (video + interaction):
-
-- `command_ack_latency_ms`: `p95 <= 20`, `p99 <= 50`
-- `input_to_next_visible_ms`: `p95 <= 90`, `p99 <= 160`
-
-### 7.2 Freshness MUST
-
-- `frame_or_tile_staleness_ms`: `p95 <= 130`, `p99 <= 220`
-
-### 7.3 Freeze MUST
-
-- No freeze > `1000ms`
-- At most 1 freeze > `500ms` per 10-minute stress run
-
-### 7.4 Throughput MUST
-
-- Mixed interactive scenario rendered FPS average `>= 24`
-- Watch scenario rendered FPS average `>= 45` at target 60
-
-### 7.5 Efficiency SHOULD
-
-- CPU reduction of >=15% versus PLAN-2 baseline in watch scenario.
-- Lower dropped-input incidence versus PLAN-2 baseline.
-
-## 8. Scenario Suite
-
-Each scenario runs 10 minutes and is replayable.
-
-- `S1`: baseline browsing, text-heavy sites, no video
-- `S2`: 1080p60 video with mixed key/click/scroll
-- `S3`: animation-heavy page with hover/click stress
-- `S4`: keyboard-dominant workflow
-- `S5`: tab-switching and navigation bursts
-
-Workload minima for `S2/S3`:
-
-- >=400 key events
-- >=250 scroll events
-- >=120 click events
-- >=90 seconds pointer movement
-
-## 9. Data and Telemetry Requirements
-
-Must emit structured logs covering:
-
-- capture decisions and activity state transitions,
-- frame/tile generation IDs and timestamps,
-- queue depths and drop/coalesce events,
-- decode and render timings,
-- end-to-end latency derivation fields.
-
-Minimum correlation fields:
-
-- `seq_id`
-- `gen_id`
-- `ts_ms`
-- `path` (`legacy_full_frame`, `binary_full_frame`, `tile`, `shm_tile`)
-
-## 10. Milestones
-
-### M0: Baseline Lock
+### M0: Feasibility Spike (must pass before full build)
 
 Deliver:
 
-- freeze current PLAN-2 metrics as comparison baseline,
-- publish reference environment profile.
+- proof that patched driver can stream screencast frames to Python daemon,
+- proof of clean start/stop lifecycle,
+- proof of screenshot fallback on patch disable.
 
-### M1: Activity-Driven Capture
+Exit gate:
 
-Deliver:
+- receives >= 300 frames in 30 seconds without daemon deadlock.
 
-- state machine and adaptive capture policy,
-- telemetry and tuning knobs.
-
-Exit:
-
-- measurable latency improvement vs M0.
-
-### M2: Binary Frame Channel v1
+### M1: Daemon Integration
 
 Deliver:
 
-- control/data channel split,
-- binary payload framing with sequence metadata,
-- legacy fallback compatibility.
+- `frame_source` negotiation and probe logic,
+- screencast event ingestion + latest-frame queue,
+- fallback automation.
 
-Exit:
-
-- reduced control-plane contention and lower tail latency.
-
-### M3: Dirty Region Prototype
+### M2: Emacs Integration
 
 Deliver:
 
-- tile/rect encode path,
-- keyframe + delta policy,
-- correctness validation on representative sites.
+- new defcustom and init wiring,
+- user-visible status message of active source.
 
-Exit:
-
-- data volume reduction with no major visual corruption.
-
-### M4: Shared Memory Transport
+### M3: Validation and Rollout
 
 Deliver:
 
-- shm ring buffer implementation,
-- notifier/control integration,
-- overflow and desync recovery behavior.
+- benchmark report vs screenshot baseline,
+- stability report and rollback instructions,
+- recommendation for default (`auto` or keep screenshot default).
 
-Exit:
+## 7. Acceptance Criteria
 
-- substantial payload-path overhead reduction versus M2.
+## 7.1 Functional
 
-### M5: Emacs Render Overhaul
+- `auto` mode selects screencast when patch is present and healthy.
+- hard fallback to screenshot works without restart in recoverable failures.
+- no regressions in navigate/back/forward/click/type/scroll workflows.
 
-Deliver:
+## 7.2 Performance (vs screenshot baseline on same machine)
 
-- generation-aware stale drop strategy,
-- optimized decode/render pipeline,
-- instrumentation for render hot path.
+- `input_to_next_frame_ms p95` improves by >= 20% in video + interaction scenario.
+- `command_ack_latency_ms p95` improves by >= 15% under frame churn.
+- freeze events (>750ms no frame while active) are not worse than baseline.
 
-Exit:
+## 7.3 Stability
 
-- reduced `decode_ms + render_ms` tails and improved interactivity.
+- zero new daemon crash class in acceptance scenarios.
+- no persistent frame stall after transient screencast failure.
 
-### M6: Replay Harness and Report Tooling
+## 8. Test Matrix
 
-Deliver:
+Each run: 10 minutes.
 
-- deterministic scenario replay,
-- one-command benchmark+report output.
+- `S1`: baseline browsing.
+- `S2`: 1080p60 playback + mixed input.
+- `S3`: heavy hover/click stress.
+- `S4`: long-session endurance.
 
-Exit:
+Run each with:
 
-- reproducible pass/fail evaluation of SLOs.
+- screenshot mode,
+- auto mode (with screencast patch enabled),
+- forced screencast mode (when available).
 
-### M7: Integration and Rollout Policy
+## 9. Rollback Requirements
 
-Deliver:
+- user can set `embr-frame-source` to `screenshot` and recover instantly.
+- disabling/removing driver patch must not break startup.
+- logs must clearly state fallback reason.
 
-- configuration defaults,
-- staged rollout flags,
-- migration and troubleshooting docs.
+## 10. Reviewer Rejection Criteria
 
-Exit:
+Reject if any are true:
 
-- deployable profile with clear rollback switches.
+- screencast path requires leaving Camoufox,
+- screencast path requires Camoufox compilation or forking,
+- any substantial new work is introduced outside item 2 scope,
+- no deterministic fallback to screenshot,
+- setup patching is version-fragile without guard,
+- no measured improvement on p95 responsiveness,
+- protocol patch leaks into unrelated Playwright behavior.
 
-## 11. Required File/Module Expectations
+## 11. Relationship to Other Plans
 
-Expected touched areas:
+PLAN-3 and PLAN-5 (Canvas Rendering) are complementary:
 
-- booster codebase (`libexec/*`) for new channels/scheduling,
-- `embr.py` for capture strategy and transport integration,
-- `embr.el` for render path and protocol integration,
-- docs (`README.md`, migration notes),
-- benchmark tooling and report scripts.
+- PLAN-3 attacks capture-side bottleneck (how frame bytes are produced/delivered from browser stack).
+- PLAN-5 attacks Emacs-side render/file-path overhead (how frame bytes are consumed).
 
-## 12. ADR Requirements
+Expected sequence:
 
-Must create ADRs for:
+1. land PLAN-3 for capture/data-plane relief,
+2. then land PLAN-5 to reduce Emacs render overhead further.
 
-- tile format selection,
-- binary framing format,
-- shm strategy and synchronization model,
-- fallback behavior and compatibility boundaries.
+## 12. Deliverables
 
-ADR template minimum:
+- `PLAN-3` code changes in daemon + Emacs + setup tooling,
+- Playwright driver micro-patch assets and version guard,
+- perf report comparing screenshot vs screencast modes,
+- README updates for new `embr-frame-source` knob and fallback behavior.
 
-- context,
-- options considered,
-- decision,
-- risks,
-- validation evidence.
+## 13. Definition of Done
 
-## 13. Rollout Strategy
+PLAN-3 is complete when:
 
-- default remains stable path until SLO gates pass,
-- enable new transport behind feature flags,
-- progressively promote features as gates pass,
-- keep on-demand fallback until two stable releases pass.
+- Camoufox-based screencast data path works in `auto` mode,
+- fallback to screenshot is reliable and documented,
+- acceptance criteria in section 7 are evaluated and reported,
+- docs and setup tooling are synchronized.
 
-## 14. Risk Register
+## 14. Source Evidence Used for This Plan
 
-Risk:
+Camoufox/Juggler sources (local research copies):
 
-- Dirty-region correctness bugs causing visual artifacts.
-Mitigation:
+- `additions/juggler/protocol/Protocol.js` (`startScreencast`, `screencastFrameAck`, `stopScreencast`, `screencastFrame` event)
+- `additions/juggler/protocol/PageHandler.js` (method handlers)
+- `additions/juggler/TargetRegistry.js` (`nsIScreencastService` start/ack flow)
 
-- periodic keyframes, checksum/assertion tools, artifact detection tests.
+Playwright runtime evidence (installed in embr venv):
 
-Risk:
-
-- shm synchronization bugs and rare desync states.
-Mitigation:
-
-- sequence checks, watchdog recovery, robust fallback switch.
-
-Risk:
-
-- Emacs render optimization introduces display regressions.
-Mitigation:
-
-- side-by-side legacy path toggle and replay comparison.
-
-Risk:
-
-- complexity outruns maintainability.
-Mitigation:
-
-- ADR discipline, milestone gates, strict scope boundaries.
-
-## 15. Review Rejection Criteria
-
-Reject if any of the following is true:
-
-- no measurable before/after evidence,
-- missing correlation fields for end-to-end timing,
-- protocol changes without compatibility path,
-- visual correctness regressions are unquantified,
-- docs and defaults are out of sync.
-
-## 16. Required Artifacts per Milestone
-
-- architecture note,
-- benchmark report (baseline vs candidate),
-- SLO pass/fail table,
-- known issues and mitigation actions,
-- updated docs/config tables where applicable.
-
-## 17. Definition of Done
-
-`PLAN-3` is complete when:
-
-- all mandatory tracks (A-F) are implemented or superseded by accepted ADRs,
-- program-level MUST SLOs are met on required environments,
-- rollout profile is documented and stable,
-- maintainers can diagnose regressions with provided telemetry and replay tooling.
-
-## 18. Immediate Next Action
-
-Create implementation tickets from milestones M1-M7 with explicit owners and non-overlapping write scopes, then execute in sequence while preserving benchmark comparability.
-
+- Firefox backend has internal screencast handling (`server/firefox/ffPage.js`, `server/screencast.js`)
+- Client-facing protocol does not expose screencast commands/events by default (`driver/package/protocol.yml`)
+- live probe result:
+  - `new_cdp_session` on Firefox fails (Chromium-only),
+  - direct channel `startScreencast` call fails with unknown protocol scheme.
 
 ## Implementation Policy Override (Execution Style)
 

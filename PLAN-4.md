@@ -7,7 +7,7 @@ Audience: core implementers, performance agents, release reviewers
 
 ## 1. Purpose
 
-`PLAN-4` is the performance-frontier program after `PLAN`, `PLAN-2`, and `PLAN-3`.
+`PLAN-4` is the performance-frontier program after `PLAN-1`, `PLAN-2`, and `PLAN-3`.
 
 It is focused on one question:
 
@@ -31,7 +31,7 @@ Allowed extension mechanisms:
 
 ## 3. Program Intent
 
-`PLAN-3` tackles major transport and render-path changes.
+`PLAN-3` replaces screenshot polling with Camoufox screencast push.
 
 `PLAN-4` pushes further by targeting the remaining hard limits:
 
@@ -76,8 +76,8 @@ Under high-load interactive scenario (`video + mixed input`):
 
 ### 5.4 Efficiency Targets
 
-- CPU reduction >= 10% versus final `PLAN-3` path in watch scenario
-- Equal or lower dropped-input incidence versus final `PLAN-3`
+- CPU reduction >= 10% versus `PLAN-3` path in watch scenario
+- Equal or lower dropped-input incidence versus `PLAN-3`
 
 ## 6. Architectural Thesis
 
@@ -200,7 +200,7 @@ Reviewers must reject changes violating this policy.
 
 Deliver:
 
-- lock final `PLAN-3` baseline metrics,
+- lock `PLAN-3` baseline metrics,
 - latency budget decomposition by stage,
 - copy-path decomposition by stage.
 
@@ -316,7 +316,7 @@ Exit:
 ### 10.2 Performance Gates
 
 - All numeric targets in section 5 met in reference scenarios.
-- No performance regressions versus final `PLAN-3` baseline on non-target scenarios.
+- No performance regressions versus `PLAN-3` baseline on non-target scenarios.
 
 ### 10.3 Stability Gates
 
@@ -413,7 +413,7 @@ Reject if:
 
 ## 17. Expected Improvement Envelope
 
-Expected incremental gains versus final `PLAN-3` baseline:
+Expected incremental gains versus `PLAN-3` baseline:
 
 - p95 input-to-visible latency: 10% to 35% improvement
 - p99 tail latency: 15% to 40% improvement

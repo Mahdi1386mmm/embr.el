@@ -43,10 +43,7 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
         embr-hover-rate-min 14
         embr-external-command "yt-dlp -o - %s | mpv -"
         embr-booster nil
-        embr-booster-args nil
-        embr-idle-timeout 5
-        embr-background-timeout 30
-        embr-shm-transport t))
+        embr-booster-args nil))
 ```
 
 **straight.el**
@@ -80,10 +77,7 @@ Emacs is the display server. Headless Firefox via [Camoufox](https://camoufox.co
         embr-hover-rate-min 14
         embr-external-command "yt-dlp -o - %s | mpv -"
         embr-booster nil
-        embr-booster-args nil
-        embr-idle-timeout 5
-        embr-background-timeout 30
-        embr-shm-transport t))
+        embr-booster-args nil))
 ```
 
 **Tip:** Make embr your default Emacs browser and enable clickable URLs everywhere:
@@ -153,9 +147,6 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-booster` | boolean | `nil` | When non-nil, launch embr-booster C proxy between Emacs and embr.py for priority scheduling. |
 | `embr-booster-path` | file | `~/.local/share/embr/embr-booster` | Path to the compiled embr-booster binary. |
 | `embr-booster-args` | list | `nil` | Additional CLI arguments for embr-booster (e.g. `("--log-level" "debug")`). |
-| `embr-idle-timeout` | integer | `5` | Seconds of no input before entering idle capture mode (5 FPS, min quality). |
-| `embr-background-timeout` | integer | `30` | Seconds of no input before entering background capture mode (1 FPS, min quality). |
-| `embr-shm-transport` | boolean | `t` | Use shared memory for frame transport on Linux. Falls back to disk if unavailable. |
 
 ## Usage
 
@@ -285,39 +276,6 @@ The booster is compiled automatically by `setup.sh` if a C compiler is available
 
 **Known side effect:** During video playback, clicks may not register if the mouse is moving. The hover timer sends CDP `page.mouse.move()` at `embr-hover-rate` Hz, which competes for pipe bandwidth with the click's `page.evaluate()` call. Workaround: hold the mouse still, then click. This tradeoff exists to prevent CDP deadlocks that would otherwise freeze all input indefinitely. Improving this is ongoing.
 
-### Transport: shared memory vs disk
-
-By default on Linux, embr uses POSIX shared memory (`/dev/shm/`) to transfer frame data from the daemon to Emacs, bypassing filesystem I/O entirely. The daemon writes JPEG data to a double-buffered shm region (~1MB) and notifies Emacs via JSON with the slot offset and frame length. Emacs reads directly from the shm file.
-
-If shared memory is unavailable (non-Linux, permissions, or frame too large for the 512KB slot), the daemon falls back to the legacy disk transport: write to a temp file, rename atomically, Emacs reads the file.
-
-Set `embr-shm-transport` to `nil` to force disk transport. The shm region is cleaned up automatically when the daemon exits.
-
-### Activity-driven capture
-
-The daemon uses a four-state activity machine to reduce CPU and bandwidth when the page is not being interacted with:
-
-| State | FPS | Quality | Trigger |
-|-------|-----|---------|---------|
-| `interactive` | max | max | Any user input |
-| `watch` | max | max | Input-priority window expires |
-| `idle` | 5 | min | No input for `embr-idle-timeout` seconds |
-| `background` | 1 | min | No input for `embr-background-timeout` seconds |
-
-Any input immediately returns to `interactive`. The daemon also tracks buffer visibility — when the embr buffer is buried, it transitions to `idle` or `background` sooner.
-
-In `idle` and `background` states, identical frames are detected via CRC32 and skipped entirely (no disk write, no notification). A safety keyframe is forced every 300 frames.
-
-### Replay harness
-
-The `tools/embr-replay.py` script provides performance analysis and replay capabilities:
-
-- `embr-replay.py report` — generates a JSON performance report from `/tmp/embr-perf.jsonl` with p50/p95/p99 metrics and SLO pass/fail
-- `embr-replay.py record` — extracts a replayable input trace from the perf log
-- `embr-replay.py replay --trace FILE` — replays a trace with original timing
-
-Scenario definitions in `tools/scenarios/` specify URLs, durations, and SLO thresholds for automated benchmarking.
-
 ## FAQ
 
 ### Does audio/video work?
@@ -349,19 +307,16 @@ PLAN-2 (PLAN-2.md) -- DONE 0.30
 Adds a C-based embr-booster transport layer to prioritize control/input traffic over frame churn with bounded queues and backpressure policy. It improves responsiveness under load by reducing pipe contention and head-of-line blocking.
 
 PLAN-3 (PLAN-3.md)
-Moves beyond transport tuning into payload/render architecture: partial updates, binary channel, shared-memory path, and Emacs render optimization. It improves FPS and freshness by reducing full-frame bandwidth and stale-frame decode work. Track B (tile pipeline) deferred by ADR-001 pending image codec decision in PLAN-4.
+Moves frame pixels off per-frame screenshot polling to Camoufox/Juggler screencast push via a guarded Playwright-driver patch, with deterministic fallback to screenshot mode. Attacks the primary capture-side bottleneck (~50ms CDP screenshot latency).
 
 PLAN-4 (PLAN-4.md)
 Pushes the no-Emacs-patch performance ceiling with copy elimination, jitter control, optional module acceleration, and strict replay benchmarking. It targets tighter p95/p99 latency and higher sustained FPS without requiring an Emacs fork.
 
 PLAN-5 (PLAN-5.md)
-Introduces Camoufox profile tuning (strict vs balanced) focused on recovering speed while keeping uBO on, images on, and non-virtual headless mode. It improves startup/navigation/revisit performance through runtime pref tuning and optional geoip install cleanup.
+Adds a canvas-aware dual rendering pipeline with automatic capability detection and safe fallback to legacy JPEG, enabling a faster canvas-stream path when available without requiring patched Emacs for baseline use.
 
 PLAN-6 (PLAN-6.md)
-Implements the full aggressive profile in one bundled pass, then validates once against strict and balanced. It is an aggressive stealth/compatibility tradeoff profile designed to maximize performance via runtime tuning, with explicit rollback if site-friction outcomes are unacceptable.
-
-PLAN-6.5 (PLAN-6.5.md)
-Focuses only on the breakthrough path: move frame pixels off per-frame screenshot polling to Camoufox/Juggler screencast push via a guarded Playwright-driver patch, with deterministic fallback to screenshot mode. New non-item-2 work is explicitly out of scope for this plan.
+Introduces Camoufox profile tuning (strict vs balanced) focused on recovering speed while keeping uBO on, images on, and non-virtual headless mode. It improves startup/navigation/revisit performance through runtime pref tuning and optional geoip install cleanup.
 
 PLAN-7 (PLAN-7.md)
-Adds a canvas-aware dual rendering pipeline with automatic capability detection and safe fallback to legacy JPEG, enabling a faster canvas-stream path when available without requiring patched Emacs for baseline use.
+Implements the full aggressive Camoufox profile in one bundled pass, then validates once against strict and balanced. It is an aggressive stealth/compatibility tradeoff profile designed to maximize performance via runtime tuning, with explicit rollback if site-friction outcomes are unacceptable.

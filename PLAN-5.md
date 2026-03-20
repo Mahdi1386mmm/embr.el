@@ -1,4 +1,4 @@
-# PLAN-5: Camoufox Performance Recovery (Balanced Stealth)
+# PLAN-5: Canvas-Aware Dual Rendering Pipeline
 
 Document status: implementation specification
 Last updated: 2026-03-20
@@ -7,404 +7,343 @@ Audience: core implementers and performance agents
 
 ## 1. Executive Summary
 
-`embr` moved from vanilla Playwright Firefox to Camoufox for anti-bot/human-likeness reliability. This improved real-world site compatibility, but introduced perceived performance regression versus pre-Camoufox behavior.
+`PLAN-7` adds a dual rendering path:
 
-`PLAN-5` defines a strict, measurable tuning program to recover performance while preserving practical human-usable stealth posture.
+- Path A: current JPEG/file path (works everywhere).
+- Path B: canvas-accelerated path (used when Canvas patch support is detected).
 
-This plan is not about removing Camoufox. It is about tuning Camoufox for a better speed/stealth balance.
+Goal:
 
-## 2. Hard Product Constraints
+- preserve universal compatibility,
+- automatically use a faster display path when available,
+- avoid any requirement that users patch Emacs just to run `embr`.
 
-These constraints are mandatory for this plan:
+## 2. Research Findings (Input to Design)
 
-- Keep Camoufox as browser engine.
-- Keep uBlock Origin enabled (do not exclude default uBO addon).
-- Keep images enabled (no `block_images=True`).
-- Do not use virtual display mode (`headless="virtual"`).
-- Preserve normal human browsing UX in Emacs.
+The `emacs-canvas-patch` and `doom-on-emacs` materials indicate:
 
-## 3. Current Baseline in `embr`
+- Canvas is introduced as an image type (`:type canvas`) with `:canvas-id`, `:canvas-width`, `:canvas-height`.
+- Native module API additions include `canvas_pixel` and `canvas_refresh`.
+- The patch is not upstream in stock Emacs and requires applying patch + recompiling Emacs.
+- Doom demo uses `image-type-available-p 'canvas` for availability checks and module C glue to write pixels and refresh.
 
-Current code path (as of this plan):
+Implication:
 
-- `embr.py` uses `AsyncNewBrowser(..., headless=True, enable_cache=True, persistent_context=True, os="linux", screen/window constrained)`.
-- `embr.py` currently does not pass `geoip=True`.
-- `setup.sh` installs `camoufox[geoip]` unconditionally.
-- Color scheme is explicitly enforced via `firefox_user_prefs` when chosen.
+- We must feature-detect at runtime and support fallback by default.
 
-Observed implication:
+## 3. Product Requirements
 
-- Runtime may carry Camoufox defaults that prioritize stealth consistency over speed in areas like history/cache/prefetch/process behavior.
-- Optional geoip functionality is installed even when not used.
+## 3.1 MUST: Dual Support
 
-## 4. Research Findings (External)
+`embr` must support both:
 
-Based on Camoufox docs and repo material:
+- standard Emacs (no canvas patch),
+- canvas-patched Emacs.
 
-- Camoufox explicitly reports performance regression in recent period and active development status.
-- Camoufox exposes many runtime knobs (`humanize`, `enable_cache`, `exclude_addons`, `headless`, `geoip`, `config`, and toggles).
-- uBO is included by default and can be excluded (we will not exclude it).
-- `humanize` defaults to `False`.
-- Camoufox config contains performance-relevant preferences (fission/process count/session history/cache/prefetch/predictor).
+## 3.2 MUST: Automatic Capability Detection
 
-Source links are listed in section 19.
+At startup, `embr` must detect canvas capability and choose backend.
 
-## 5. Goals
+## 3.3 MUST: Better Pipe When Available
 
-Primary goals:
+If canvas path is available, frame transport must avoid disk JPEG file roundtrip and use a lower-overhead pipeline.
 
-1. Recover a meaningful fraction of pre-Camoufox responsiveness.
-2. Keep anti-bot compatibility acceptable for real human browsing.
-3. Provide explicit profile-based tuning with measurable outcomes.
+## 3.4 MUST: Safe Fallback
 
-Secondary goals:
+If detection fails or canvas path errors at runtime, `embr` must degrade to legacy path without crashing the session.
 
-- reduce startup and warm-navigation latency,
-- improve back/forward and revisit behavior,
-- keep tuning maintainable and reversible.
+## 4. Compatibility Matrix
 
-## 6. Non-Goals
+Supported runtime states:
 
-- Removing Camoufox.
-- Disabling uBO.
-- Disabling images.
-- Switching to virtual display mode.
-- Maximizing anonymity at all costs.
+1. `stock-emacs`:
+   - backend = `legacy-jpeg-file`
+   - behavior = current.
 
-## 7. Hypotheses
+2. `patched-emacs + no module`:
+   - backend = `legacy-jpeg-file`
+   - behavior = current with warning.
 
-H1:
+3. `patched-emacs + canvas module`:
+   - backend = `canvas-stream`
+   - behavior = accelerated path enabled.
 
-- The largest recoverable speed is in restoring parts of Firefox caching/history/prefetch behavior currently constrained by Camoufox defaults.
+4. `patched-emacs + module load failure`:
+   - backend = fallback `legacy-jpeg-file`
+   - behavior = recover and continue.
 
-H2:
+## 5. Runtime Detection Specification
 
-- Some process-model defaults can be tuned for lower latency on typical desktop hardware.
+Detection should be explicit and layered.
 
-H3:
+## 5.1 Layer 1: Elisp Capability Check
 
-- Optional geoip package/install overhead can be reduced with minimal risk when geoip is unused.
+- `(image-type-available-p 'canvas)` must return non-nil.
 
-H4:
+## 5.2 Layer 2: Module Availability Check
 
-- A balanced profile can improve UX without materially harming human-site success rates.
+- load `embr-canvas` module from `libexec`.
+- call module function `embr_canvas_supported_p`.
+- module should verify env function pointers for canvas API.
 
-## 8. Required Profile Model
+## 5.3 Layer 3: Smoke Render Check
 
-`PLAN-5` introduces explicit Camoufox runtime profiles in `embr`.
+- create tiny canvas image spec (for example 4x4),
+- perform one pixel write + refresh through module,
+- verify no error.
 
-Mandatory profiles:
+Only if all three pass, choose `canvas-stream` backend.
 
-- `camoufox-default` (vanilla recovery): use Camoufox runtime defaults, with only hard product constraints from section 2 and explicit user/UI choices (for example color scheme) applied.
-- `strict` (baseline-preserving): current behavior, minimal changes.
-- `balanced` (target profile): performance-first but still practical stealth.
+## 6. Rendering Backend Abstraction
 
-Optional profile (future only):
+Introduce a rendering backend interface in `embr.el`:
 
-- `aggressive` is not part of core implementation. It is documented only in Addendum A.
+- `embr--backend-init`
+- `embr--backend-on-frame`
+- `embr--backend-shutdown`
+- `embr--backend-name`
 
-## 9. Functional Requirements
+Required backends:
 
-## 9.1 MUST: Profile Selection
+- `legacy-jpeg-file` (existing behavior),
+- `canvas-stream` (new behavior).
 
-Add an Emacs-facing configuration for Camoufox profile selection.
+## 7. Canvas-Stream Pipeline Design
 
-Required behavior:
+## 7.1 Control/Data Split
 
-- default profile must be `strict` on first release,
-- user can switch to `camoufox-default` at any time,
-- user can opt into `balanced`,
-- profile choice is passed to daemon initialization.
+Keep JSON control protocol for commands/responses.
 
-## 9.2 MUST: Safe Merge of Preferences
+Add dedicated frame data channel for canvas backend.
 
-`embr.py` must merge profile prefs with existing runtime prefs (including color scheme overrides) deterministically.
+Recommended v1 transport:
 
-Required behavior:
+- UNIX domain socket for frame payloads,
+- length-prefixed frame packets with monotonic sequence IDs.
 
-- no profile may remove existing explicit color scheme behavior,
-- profile prefs are additive/override only where defined,
-- unknown profile errors must be explicit and non-crashing.
+## 7.2 Packet Format (v1)
 
-## 9.3 MUST: Keep Required UX/Stealth Choices
+Per frame packet:
 
-The implementation must enforce:
+- `uint32 seq`
+- `uint32 width`
+- `uint32 height`
+- `uint32 jpeg_len`
+- `jpeg_bytes[jpeg_len]`
 
-- uBO retained (no `exclude_addons` override for UBO),
-- `block_images` remains false/unused,
-- no virtual display mode introduction,
-- `humanize` remains disabled by default unless explicitly configured.
+(Initial v1 keeps JPEG capture in daemon to minimize browser-side changes.)
 
-## 9.4 MUST: GeoIP Installation Split
+## 7.3 Emacs Module Role
 
-Setup path must support installing Camoufox without geoip extras by default for non-geoip users.
+`embr-canvas` module responsibilities:
 
-Required behavior:
+- decode incoming JPEG payload in C (prefer libjpeg-turbo if available),
+- write decoded RGBA/BGRA pixels into `canvas_pixel` buffer,
+- call `canvas_refresh`.
 
-- default install path can be plain `camoufox` package,
-- optional path enables `camoufox[geoip]` only when requested,
-- behavior documented clearly.
+This replaces Elisp file read + `create-image` per frame for canvas path.
 
-## 9.5 MUST: Tuning Gate and Vanilla Rollback
+## 7.4 Sequence and Stale-Frame Policy
 
-All Camoufox tuning deltas introduced by this plan must be profile-gated.
+- maintain latest `seq` rendered,
+- drop out-of-order or stale packets,
+- prefer newest frame under pressure.
 
-Required behavior:
+## 8. Daemon Changes (`embr.py`)
 
-- `camoufox-default` must apply no PLAN-5 performance-pref bundle,
-- `strict` and `balanced` may apply only their declared deltas,
-- user must be able to return to `camoufox-default` without reinstall or profile deletion,
-- rollback instructions to `camoufox-default` must be documented in README and troubleshooting notes.
+## 8.1 Init Contract
 
-## 10. `balanced` Profile Requirements
+Add optional init fields:
 
-`balanced` should restore user-perceived browsing speed while avoiding obviously high-risk stealth regressions.
+- `render_backend` (`legacy-jpeg-file` or `canvas-stream`)
+- `frame_socket_path` (when canvas-stream)
 
-Initial required preference candidate set for A/B testing:
+## 8.2 Legacy Path
 
-- `dom.ipc.processPrelaunch.enabled = true`
-- `browser.cache.memory.enable = true`
-- `browser.sessionhistory.max_entries = 50` (or tuned value)
-- `browser.sessionhistory.max_total_viewers = 8` (or tuned value)
-- `network.dns.disablePrefetch = false`
-- `network.dns.disablePrefetchFromHTTPS = false`
-- `network.prefetch-next = true`
-- `network.predictor.enabled = true`
+No behavior regression.
 
-Process count tuning requirement:
+## 8.3 Canvas Path
 
-- sweep candidate values for `dom.ipc.processCount` (for example: 8, 12, 16)
-- choose value by measured latency/resource tradeoff on reference hardware
+- continue screenshot capture loop,
+- send JPEG bytes to frame socket using packet format,
+- emit lightweight JSON metadata as needed (title/url/frame seq).
 
-Out of scope for `balanced` (reserved for Addendum A):
+## 9. Emacs Lisp Changes (`embr.el`)
 
-- disabling fission isolation defaults,
-- major anti-detect patch relaxations,
-- disabling core stealth invariants.
+Required additions:
 
-## 11. Performance Requirements and Acceptance Gates
+- backend detection and selection logic,
+- canvas image spec management (`:type canvas` with stable `:canvas-id`),
+- frame socket reader/process integration,
+- backend metrics counters and debug command.
 
-All gates compare candidate profile against `strict` baseline on same machine/session.
+`embr.el` must expose a user override:
 
-### 11.1 MUST: Responsiveness
+- `embr-render-backend-preference`: `auto`, `legacy`, `canvas`
 
-Under mixed interaction scenario:
+Behavior:
 
-- `input_to_next_visible_ms p95` improves by >= 12%
-- `input_to_next_visible_ms p99` does not regress
-- `command_ack_latency_ms p95` does not regress
+- `auto` tries canvas then falls back.
+- `legacy` bypasses detection.
+- `canvas` attempts canvas and errors clearly if unavailable.
 
-### 11.2 MUST: Navigation and Revisit
+## 10. Native Module Requirements (`libexec`)
 
-- `domcontentloaded_ms p95` improves by >= 10%
-- back/forward revisit latency p95 improves by >= 20%
+Create module implementation in `libexec`.
 
-### 11.3 MUST: Stability
+Required files:
 
-- no increase in crash count,
-- no new long freezes (> 1.5s) relative to baseline,
-- no new protocol/daemon fatal errors.
+- `libexec/embr-canvas.c`
+- `libexec/Makefile` updates for module target
 
-### 11.4 MUST: Human-Site Compatibility
+Required exported module functions:
 
-Define a fixed site set used by maintainers.
+- `embr_canvas_supported_p`
+- `embr_canvas_blit_jpeg`
+- `embr_canvas_version`
 
-Acceptance:
+`embr_canvas_blit_jpeg` contract:
 
-- challenge/friction incidence must not worsen by more than 10% vs baseline,
-- critical real-user workflows (login/navigation/media/form input) remain functional.
+- args: `(canvas-spec-or-object, bytes, width, height, seq)` or equivalent
+- effect: decode + copy + refresh
+- return: success flag / error code
 
-### 11.5 SHOULD: Efficiency
-
-- CPU in watch scenario improves by >= 5% or remains neutral with clear UX gain,
-- memory increase acceptable if user-visible latency improvements are achieved.
-
-## 12. Benchmark Protocol
-
-## 12.1 Scenario Set
-
-Each scenario runs 10 minutes:
-
-- `C1`: normal reading/navigation across content-heavy sites
-- `C2`: media + mixed input (scroll, click, text entry)
-- `C3`: tab switching + back/forward revisits
-- `C4`: form-heavy session
-
-## 12.2 Metrics Collection
-
-Must capture:
-
-- startup init time (`init` to first usable frame),
-- navigation timing (`domcontentloaded` and interactive readiness proxy),
-- input latency metrics from existing performance harness,
-- freeze counts and duration,
-- CPU and RSS snapshots.
-
-## 12.3 Comparative Runs
-
-Required run order:
-
-1. `strict` baseline x2
-2. `balanced` candidate x2
-3. choose winner on median of repeated runs
-
-## 13. Implementation Requirements by File
-
-Expected touched files:
-
-- `embr.el`:
-  - new defcustoms for Camoufox profile and optional advanced prefs,
-  - protocol field pass-through for selected profile,
-  - docs/help text.
-
-- `embr.py`:
-  - profile-to-prefs mapping,
-  - deterministic merge of profile prefs + existing prefs,
-  - initialization option plumbing.
-
-- `setup.sh`:
-  - split install behavior for geoip extra vs plain install.
-
-- `README.md`:
-  - new config entries and defaults,
-  - clear explanation of strict vs balanced profiles,
-  - setup notes for geoip optional install.
-
-## 14. Security and Risk Requirements
+## 11. Safety and Fallback Requirements
 
 MUST:
 
-- keep high-risk stealth relaxations out of default path,
-- log profile selection at startup for diagnostics,
-- preserve deterministic fallback to `strict` on unknown config.
-- preserve explicit user path back to `camoufox-default`.
+- fallback to legacy on module load failure,
+- fallback to legacy on repeated decode/render errors,
+- never hard-crash Emacs due canvas path failure.
 
 SHOULD:
 
-- expose a one-command way to print current profile + active prefs subset,
-- include warning text when non-strict profile is enabled.
+- include rate-limited warning logs,
+- include command to force backend switch during session for debugging.
 
-## 15. Milestones
+## 12. Performance Requirements
 
-### M0: Baseline Lock
+Compare canvas backend against legacy on same machine.
+
+### 12.1 MUST: Latency and Throughput
+
+- frame render path CPU in Emacs process improves by >= 20% in video scenario,
+- `input_to_next_visible_ms p95` improves by >= 10%,
+- rendered FPS in stress scenario improves by >= 15%.
+
+### 12.2 MUST: Stability
+
+- no increase in crash/fatal error class,
+- no sustained freeze regression vs legacy.
+
+### 12.3 SHOULD: Tail Improvement
+
+- `input_to_next_visible_ms p99` improves by >= 10%,
+- dropped stale frame ratio decreases under burst load.
+
+## 13. Test Plan
+
+## 13.1 Matrix
+
+- `T1`: stock Emacs -> legacy path
+- `T2`: patched Emacs without module -> legacy fallback
+- `T3`: patched Emacs with module -> canvas path
+- `T4`: forced runtime failure in canvas path -> fallback works
+
+## 13.2 Scenarios
+
+Each scenario 10 minutes:
+
+- normal browsing,
+- video + mixed interaction,
+- tab churn and navigation bursts,
+- long session endurance.
+
+## 13.3 Validation Outputs
+
+- backend selection log,
+- capability check report,
+- latency/FPS comparison table,
+- fallback incident report.
+
+## 14. Milestones
+
+### M0: Capability Detection and Backend Abstraction
 
 Deliver:
 
-- freeze strict-profile baseline metrics,
-- finalize test site set and scenario scripts.
+- backend interface,
+- detection logic,
+- no-regression legacy path.
 
-### M1: Plumbing and Profile Abstraction
-
-Deliver:
-
-- profile config exposed in Emacs,
-- daemon support for profile selection,
-- no behavior change in `strict`,
-- `camoufox-default` path wired end-to-end.
-
-### M2: GeoIP Packaging Split
+### M1: Frame Socket and Protocol
 
 Deliver:
 
-- setup flow for plain camoufox default,
-- optional geoip install path.
+- daemon frame socket writer,
+- Emacs socket reader integration,
+- packet sequencing.
 
-### M3: Balanced Prefs A/B Matrix
-
-Deliver:
-
-- controlled sweep for cache/history/process/predictor candidates,
-- report with winning combination.
-
-### M4: Integration and Docs
+### M2: Canvas Module v1
 
 Deliver:
 
-- chosen balanced profile implemented,
-- README and configuration docs synchronized.
+- module build + load,
+- JPEG decode + canvas refresh path,
+- error handling and diagnostics.
 
-### M5: Final Validation
+### M3: Full Integration and Fallback
 
 Deliver:
 
-- acceptance report with pass/fail against section 11,
-- recommendation on default profile promotion timeline.
+- auto selection,
+- runtime fallback,
+- user backend override.
 
-## 16. Review Rejection Criteria
+### M4: Perf Validation and Docs
 
-Reject if any are true:
+Deliver:
 
-- uBO is disabled or default-excluded,
-- images are blocked by default,
-- virtual display mode is introduced as default/required,
-- no strict vs balanced comparative metrics provided,
-- stealth/compatibility regressions are unmeasured,
-- docs/config are out of sync,
-- no user-visible rollback path to `camoufox-default`.
+- benchmark report,
+- README/backend docs,
+- rollout recommendation.
 
-## 17. Expected Improvement Envelope
+## 15. Reviewer Rejection Criteria
 
-Estimated incremental gains for this plan (vs current strict baseline):
+Reject if:
 
-- startup and warm navigation: 8% to 20%
-- back/forward and revisit responsiveness: 15% to 35%
-- perceived interactivity under mixed browsing: 10% to 25%
+- canvas path is not optional/fallback-safe,
+- stock Emacs behavior regresses,
+- backend detection is unreliable/ambiguous,
+- no measurable perf evidence,
+- docs do not explain capability and fallback behavior.
 
-These are planning estimates, not guaranteed acceptance outcomes.
+## 16. Definition of Done
 
-## 18. Definition of Done
+PLAN-5 is complete when:
 
-`PLAN-5` is complete when:
+- dual backend support is implemented,
+- automatic canvas detection works reliably,
+- canvas path is functional on patched Emacs with module,
+- fallback to legacy is robust,
+- performance improvements meet section 12 thresholds,
+- documentation is complete.
 
-- camoufox-default, strict, and balanced profiles are implemented and documented,
-- geoip install split is implemented and documented,
-- mandatory gates in section 11 pass,
-- no hard-constraint violations in section 2,
-- release recommendation is backed by reproducible benchmark evidence.
+## 17. Source References
 
-## 19. Sources Used (Research)
-
-- Camoufox Python usage docs:
-  - https://camoufox.com/python/usage/
-- Camoufox stealth overview (performance status note):
-  - https://camoufox.com/stealth/
-- Camoufox cursor movement behavior/defaults:
-  - https://camoufox.com/fingerprint/cursor-movement/
-- Camoufox default addon behavior (uBO and exclusion mechanism):
-  - https://camoufox.com/fingerprint/addons/
-- Camoufox installation/geoip notes:
-  - https://camoufox.com/python/installation/
-  - https://camoufox.com/python/geoip/
-- Camoufox repository and config defaults:
-  - https://github.com/daijro/camoufox
-  - https://raw.githubusercontent.com/daijro/camoufox/main/settings/camoufox.cfg
-
-## Addendum A: Future Recommendation (Optional, Not in Core PLAN-5)
-
-This addendum corresponds to the previously discussed "optional 6" path.
-
-Purpose:
-
-- recover more speed by relaxing higher-risk stealth defaults.
-
-Scope (future experiment only):
-
-- evaluate fission/isolation relaxations and related anti-detect tradeoffs,
-- evaluate more aggressive process/isolation reductions,
-- evaluate broader stealth patch relaxations where measurable speed payoff exists.
-
-Requirements for any Addendum-A trial:
-
-- must be behind explicit `aggressive` profile toggle,
-- must never become default without separate approval,
-- must include stricter anti-bot challenge tracking,
-- must provide rollback to `strict` and `balanced` immediately.
-
-Expected upside/risk:
-
-- upside may exceed balanced profile gains,
-- detection/challenge risk is materially higher,
-- intended only for users prioritizing speed over stealth headroom.
+- Canvas patch repository:
+  - https://github.com/minad/emacs-canvas-patch
+- Canvas patch README:
+  - https://raw.githubusercontent.com/minad/emacs-canvas-patch/main/README.org
+- Canvas demo Elisp:
+  - https://raw.githubusercontent.com/minad/emacs-canvas-patch/main/canvas-demo.el
+- Canvas patch diff:
+  - https://raw.githubusercontent.com/minad/emacs-canvas-patch/main/canvas.diff
+- Doom on Emacs (Canvas usage example):
+  - https://github.com/minad/doom-on-emacs
+  - https://raw.githubusercontent.com/minad/doom-on-emacs/master/README.org
+- Upstream discussion:
+  - https://debbugs.gnu.org/cgi/bugreport.cgi?bug=80281
 
 
 ## Implementation Policy Override (Execution Style)
