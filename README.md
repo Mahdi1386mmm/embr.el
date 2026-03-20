@@ -297,26 +297,3 @@ Unknown. Let us know.
 ### Windows?
 
 No.
-
-## TODOs - PERFORMANCE
-
-PLAN-1 (PLAN.md) -- DONE 0.20
-Builds the baseline responsiveness system: input-first scheduling, adaptive capture behavior, hover shedding, and measurable perf reporting. It improves interaction latency consistency and reduces freeze events while establishing objective pass/fail gates.
-
-PLAN-2 (PLAN-2.md) -- DONE 0.30
-Adds a C-based embr-booster transport layer to prioritize control/input traffic over frame churn with bounded queues and backpressure policy. It improves responsiveness under load by reducing pipe contention and head-of-line blocking.
-
-PLAN-3 (PLAN-3.md)
-Moves frame pixels off per-frame screenshot polling to Camoufox/Juggler screencast push via a guarded Playwright-driver patch, with deterministic fallback to screenshot mode. Attacks the primary capture-side bottleneck (~50ms CDP screenshot latency).
-
-PLAN-4 (PLAN-4.md)
-Pushes the no-Emacs-patch performance ceiling with copy elimination, jitter control, optional module acceleration, and strict replay benchmarking. It targets tighter p95/p99 latency and higher sustained FPS without requiring an Emacs fork.
-
-PLAN-5 (PLAN-5.md)
-Adds a canvas-aware dual rendering pipeline with automatic capability detection and safe fallback to legacy JPEG, enabling a faster canvas-stream path when available without requiring patched Emacs for baseline use.
-
-PLAN-6 (PLAN-6.md)
-Introduces Camoufox profile tuning (strict vs balanced) focused on recovering speed while keeping uBO on, images on, and non-virtual headless mode. It improves startup/navigation/revisit performance through runtime pref tuning and optional geoip install cleanup.
-
-PLAN-7 (PLAN-7.md)
-Implements the full aggressive Camoufox profile in one bundled pass, then validates once against strict and balanced. It is an aggressive stealth/compatibility tradeoff profile designed to maximize performance via runtime tuning, with explicit rollback if site-friction outcomes are unacceptable.
