@@ -336,6 +336,10 @@ No plans to add this upstream, but PRs are welcome. If you implement it, gate it
 
 Unknown. Let us know.
 
+### Windows?
+
+No.
+
 ## TODOs - PERFORMANCE
 
 PLAN-1 (PLAN.md) -- DONE 0.20
