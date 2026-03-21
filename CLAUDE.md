@@ -1,3 +1,5 @@
+I need you to stop guessing, stop treating me like I'm dumb, ask me more questions about how I want to solve this, etc.
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.

@@ -42,7 +42,7 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
         embr-hover-move-threshold-px 0
         embr-hover-rate-min 14
         embr-external-command "yt-dlp -o - %s | mpv -"
-))
+        embr-display-method 'headless))
 ```
 
 **straight.el**
@@ -75,7 +75,7 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
         embr-hover-move-threshold-px 0
         embr-hover-rate-min 14
         embr-external-command "yt-dlp -o - %s | mpv -"
-))
+        embr-display-method 'headless))
 ```
 
 **Tip:** Make embr your default Emacs browser and enable clickable URLs everywhere:
@@ -87,7 +87,7 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
 
 ## Setup
 
-After installing, run `M-x embr-setup-or-update` to create the Python venv and download CloakBrowser (a stealth Chromium with source-level fingerprint patches).
+After installing, run `M-x embr-setup-or-update-all` to create the Python venv and download CloakBrowser (a stealth Chromium with source-level fingerprint patches).
 
 If you skip this step, `M-x embr-browse` will detect the missing venv and offer to run setup for you automatically.
 
@@ -97,7 +97,9 @@ All management is done from Emacs, no terminal needed.
 
 | Command | Description |
 |---------|-------------|
-| `M-x embr-setup-or-update` | Install or update venv + CloakBrowser + ad blocklist (runs `setup.sh`) |
+| `M-x embr-setup-or-update-all` | Install or update CloakBrowser + ad blocklist + uBlock Origin (runs `setup.sh --all`) |
+| `M-x embr-update-blocklist` | Update the ad/tracker domain blocklist |
+| `M-x embr-update-ublock` | Update uBlock Origin to the latest release |
 | `M-x embr-uninstall` | Remove venv and browser profile; optionally delete browser cache (runs `uninstall.sh`) |
 | `M-x embr-info` | Show diagnostic info about the installation |
 
@@ -119,7 +121,7 @@ Version 0.40 replaces the browser engine (Camoufox/Firefox → CloakBrowser/Chro
 
 1. On 0.30, run `M-x embr-uninstall` to remove the old venv, browser cache, and profile.
 2. Remove the package from Elpaca/straight (delete from your config, restart Emacs, let it re-clone).
-3. Install 0.40 fresh and run `M-x embr-setup-or-update`.
+3. Install 0.40 fresh and run `M-x embr-setup-or-update-all`.
 
 If you skipped step 1, you can manually remove leftover 0.30 state:
 
@@ -154,6 +156,7 @@ rm -rf ~/.local/share/embr ~/.cache/camoufox
 | `embr-hover-move-threshold-px` | integer | `0` | Minimum pixel distance before sending a hover update. Filters sub-pixel jitter. |
 | `embr-hover-rate-min` | integer | `14` | Minimum hover rate (Hz) under load pressure. Hover self-throttles from `embr-hover-rate` to this. |
 | `embr-external-command` | string | yt-dlp + mpv | Shell command for `&` key (`%s` = URL). Default pipes through yt-dlp into mpv. |
+| `embr-display-method` | symbol | `'headless` | `'headless` (no window, no audio), `'headed` (visible window, audio), `'headed-offscreen` (hidden window via Xvfb, audio). |
 
 ## Usage
 
@@ -220,9 +223,36 @@ Standard Emacs bookmarks work: `C-x r m` to save, `C-x r b` to jump.
 
 ## Ad Blocking
 
-**Domain-level blocklist** — using the [StevenBlack/hosts](https://github.com/StevenBlack/hosts) list (~82K ad and tracker domains), requests to blocked domains are intercepted and killed before they hit the network.
+A **domain-level blocklist** using the [StevenBlack/hosts](https://github.com/StevenBlack/hosts) list (~82K ad and tracker domains) is included out of the box. Requests to blocked domains are intercepted and killed before they hit the network. The blocklist is downloaded by `setup.sh` and refreshed alongside the CloakBrowser binary every time you run `M-x embr-setup-or-update-all` — run it periodically to keep both up to date.
 
-The blocklist is downloaded automatically by `setup.sh` and refreshed every time you run `M-x embr-setup-or-update`.
+### uBlock Origin (optional)
+
+For full cosmetic filtering, element hiding, and script-level ad blocking (e.g. YouTube ads), you can install [uBlock Origin](https://github.com/gorhill/uBlock) as a Chromium extension. Headless Chromium does not support extensions, so this requires a one-time setup in headed mode. `M-x embr-setup-or-update-all` downloads the latest uBlock Origin release for you — you just need to enable it once.
+
+1. **Install Xvfb** (if you don't have it — needed for `headed-offscreen` mode):
+
+   ```sh
+   # Arch
+   sudo pacman -S xorg-server-xvfb
+   # Debian/Ubuntu
+   sudo apt install xvfb
+   # Fedora
+   sudo dnf install xorg-x11-server-Xvfb
+   ```
+
+2. **Switch to headed mode** so you can see the browser:
+
+   ```elisp
+   (setq embr-display-method 'headed)
+   ```
+
+3. **Enable the extension** — restart embr, navigate to `chrome://extensions`, turn on **Developer mode** (top-right toggle), then click **Load unpacked** and select `~/.local/share/embr/extensions/ublock/uBlock0.chromium`. This is a one-time step — the extension persists in your browser profile across restarts.
+
+4. **Switch to headed-offscreen** to hide the browser window while keeping extensions and audio:
+
+   ```elisp
+   (setq embr-display-method 'headed-offscreen)
+   ```
 
 ## How It Works
 

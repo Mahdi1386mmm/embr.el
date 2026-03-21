@@ -193,6 +193,16 @@ The hover timer runs at `embr-hover-rate' normally, but self-throttles
 to this rate when the daemon is under input pressure."
   :type 'integer)
 
+(defcustom embr-display-method 'headless
+  "How the browser display is managed.
+`headless' runs Chromium in headless mode (no window, no audio).
+`headed' runs Chromium on your real display (visible window, audio).
+`headed-offscreen' runs Chromium headed on a virtual display via
+xvfb-run (invisible window, audio works via PulseAudio/PipeWire)."
+  :type '(choice (const :tag "Headless (no window, no audio)" headless)
+                 (const :tag "Headed (visible window, audio)" headed)
+                 (const :tag "Headed offscreen (hidden window, audio)" headed-offscreen)))
+
 (defun embr--search-url (query)
   "Build a search URL for QUERY using `embr-search-engine'."
   (let ((template (pcase embr-search-engine
@@ -212,27 +222,46 @@ Checks that both the venv Python and the cloakbrowser package exist."
             (call-process embr-python nil nil nil
                           "-c" "import cloakbrowser")))))
 
-;;;###autoload
-(defun embr-setup-or-update ()
-  "Run setup.sh to install or update the Python venv, CloakBrowser, and ad blocklist.
-Safe to run at any time — rebuilds in a temp venv and swaps atomically."
-  (interactive)
+(defun embr--run-setup (args msg)
+  "Run setup.sh with ARGS and display MSG on completion."
   (let ((setup-script (expand-file-name "setup.sh" embr--directory)))
     (unless (file-exists-p setup-script)
       (error "embr: setup.sh not found in %s" embr--directory))
     (let ((buf (get-buffer-create "*embr-setup*")))
       (with-current-buffer buf (erase-buffer))
       (pop-to-buffer buf)
-      (insert (format "Running setup.sh in %s ...\n\n" embr--directory))
-      (let ((proc (start-process "embr-setup" buf
-                                  "bash" setup-script)))
+      (insert (format "Running setup.sh %s ...\n\n" args))
+      (let ((proc (apply #'start-process "embr-setup" buf
+                          "bash" setup-script args)))
         (set-process-sentinel
          proc
          (lambda (_proc event)
            (when (string-match-p "finished" event)
              (with-current-buffer (get-buffer "*embr-setup*")
                (goto-char (point-max))
-               (insert "\nDone. You can now run M-x embr-browse.\n")))))))))
+               (insert (format "\n%s\n" msg))))))))))
+
+;;;###autoload
+(defun embr-setup-or-update-all ()
+  "Install or update CloakBrowser, ad blocklist, and uBlock Origin.
+Note: uBlock Origin requires one-time manual setup in headed mode.
+See README.md for instructions."
+  (interactive)
+  (embr--run-setup '("--all") "Done. You can now run M-x embr-browse."))
+
+;;;###autoload
+(defun embr-update-blocklist ()
+  "Update the ad/tracker domain blocklist."
+  (interactive)
+  (embr--run-setup '("--blocklist") "Blocklist updated."))
+
+;;;###autoload
+(defun embr-update-ublock ()
+  "Update uBlock Origin to the latest release.
+Note: uBlock Origin requires one-time manual setup in headed mode.
+See README.md for instructions."
+  (interactive)
+  (embr--run-setup '("--ublock") "uBlock Origin updated."))
 
 ;;;###autoload
 (defun embr-uninstall ()
@@ -311,19 +340,37 @@ This does NOT remove the Emacs package itself — use your package manager for t
 ;; ── Process management ─────────────────────────────────────────────
 
 (defun embr--start-daemon ()
-  "Start the Python daemon process."
+  "Start the Python daemon process.
+Respects `embr-display-method' for display modes."
   (when (and embr--process (process-live-p embr--process))
     (delete-process embr--process))
   (setq embr--response-buffer "")
-  (setq embr--process
-        (make-process
-         :name "embr"
-         :command (list embr-python embr-script)
-         :connection-type 'pipe
-         :noquery t
-         :stderr (get-buffer-create "*embr-stderr*")
-         :filter #'embr--process-filter
-         :sentinel #'embr--process-sentinel)))
+  (let* ((inner (list embr-python embr-script))
+         (xvfb (and (eq embr-display-method 'headed-offscreen)
+                    (executable-find "xvfb-run")))
+         (command
+          (if xvfb
+              (append (list xvfb "--auto-servernum"
+                            "--server-args=-screen 0 1920x1080x24")
+                      inner)
+            (when (and (eq embr-display-method 'headed-offscreen)
+                       (not (executable-find "xvfb-run")))
+              (message "embr: xvfb-run not found, falling back to headless"))
+            inner))
+         (process-environment
+          (cons (format "EMBR_DISPLAY=%s"
+                        (if xvfb "headed-offscreen"
+                          (symbol-name embr-display-method)))
+                process-environment)))
+    (setq embr--process
+          (make-process
+           :name "embr"
+           :command command
+           :connection-type 'pipe
+           :noquery t
+           :stderr (get-buffer-create "*embr-stderr*")
+           :filter #'embr--process-filter
+           :sentinel #'embr--process-sentinel))))
 
 (defun embr--process-filter (_proc output)
   "Handle OUTPUT from the daemon process."
@@ -1064,9 +1111,9 @@ If the daemon is already running, just navigate to the new URL."
   (when (embr--setup-needed-p)
     (if (y-or-n-p "embr: Setup needed (venv or CloakBrowser missing). Run now? ")
         (progn
-          (embr-setup-or-update)
+          (embr-setup-or-update-all)
           (error "embr: Setup started in *embr-setup* buffer. Run M-x embr-browse again when it finishes"))
-      (error "embr: Run M-x embr-setup-or-update first")))
+      (error "embr: Run M-x embr-setup-or-update-all first")))
   ;; Create buffer if needed.
   (unless (buffer-live-p embr--buffer)
     (setq embr--buffer (generate-new-buffer "*embr*"))

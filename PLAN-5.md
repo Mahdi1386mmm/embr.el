@@ -7,7 +7,7 @@ Audience: core implementers and performance agents
 
 ## 1. Executive Summary
 
-`PLAN-7` adds a dual rendering path:
+`PLAN-5` adds a dual rendering path:
 
 - Path A: current JPEG/file path (works everywhere).
 - Path B: canvas-accelerated path (used when Canvas patch support is detected).
@@ -82,7 +82,7 @@ Detection should be explicit and layered.
 
 ## 5.2 Layer 2: Module Availability Check
 
-- load `embr-canvas` module from `libexec`.
+- load `embr-canvas` module from the repository's native module directory (`native/`).
 - call module function `embr_canvas_supported_p`.
 - module should verify env function pointers for canvas API.
 
@@ -164,7 +164,8 @@ No behavior regression.
 
 ## 8.3 Canvas Path
 
-- continue screenshot capture loop,
+- consume JPEG frame payloads from the active daemon capture source
+  (screenshot or screencast),
 - send JPEG bytes to frame socket using packet format,
 - emit lightweight JSON metadata as needed (title/url/frame seq).
 
@@ -187,14 +188,14 @@ Behavior:
 - `legacy` bypasses detection.
 - `canvas` attempts canvas and errors clearly if unavailable.
 
-## 10. Native Module Requirements (`libexec`)
+## 10. Native Module Requirements (`native/`)
 
-Create module implementation in `libexec`.
+Create module implementation in `native/`.
 
 Required files:
 
-- `libexec/embr-canvas.c`
-- `libexec/Makefile` updates for module target
+- `native/embr-canvas.c`
+- `native/Makefile` updates for module target
 
 Required exported module functions:
 
@@ -317,6 +318,7 @@ Reject if:
 - backend detection is unreliable/ambiguous,
 - no measurable perf evidence,
 - docs do not explain capability and fallback behavior.
+- implementation requires reintroducing booster or `libexec`-specific runtime coupling.
 
 ## 16. Definition of Done
 

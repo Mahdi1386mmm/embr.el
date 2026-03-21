@@ -13,7 +13,8 @@ from urllib.parse import urlparse
 FRAME_PATH = os.path.join(tempfile.gettempdir(), "embr-frame.jpg")
 PERF_LOG_PATH = os.path.join(tempfile.gettempdir(), "embr-perf.jsonl")
 SCRIPT_DIR = Path(__file__).resolve().parent
-BLOCKLIST_PATH = SCRIPT_DIR / "blocklist.txt"
+DATA_DIR = Path.home() / ".local" / "share" / "embr"
+BLOCKLIST_PATH = DATA_DIR / "blocklist.txt"
 
 
 class PerfLog:
@@ -100,10 +101,26 @@ async def main():
     adapt_cooldown = 0
     last_rendered_frame_id = 0
 
-    user_data_dir = Path.home() / ".local" / "share" / "embr" / "chromium-profile"
+    data_dir = Path.home() / ".local" / "share" / "embr"
+    user_data_dir = data_dir / "chromium-profile"
     user_data_dir.mkdir(parents=True, exist_ok=True)
 
-    print("embr: engine=cloakbrowser", file=sys.stderr)
+    # uBlock Origin extension (downloaded by setup.sh --ublock).
+    ublock_dir = data_dir / "extensions" / "ublock" / "uBlock0.chromium"
+    _ublock_ext_args = []
+    if ublock_dir.is_dir():
+        ext = str(ublock_dir)
+        _ublock_ext_args = [f"--load-extension={ext}"]
+        print(f"embr: uBlock Origin loaded from {ext}", file=sys.stderr)
+
+    # Display mode: headless (default), headed (real display),
+    # headed-offscreen (virtual display via xvfb-run).
+    _display_mode = os.environ.get("EMBR_DISPLAY", "headless")
+    _use_headless = _display_mode == "headless"
+    if _display_mode == "headed-offscreen":
+        os.environ.pop("WAYLAND_DISPLAY", None)
+        os.environ["GDK_BACKEND"] = "x11"
+    print(f"embr: engine=cloakbrowser display={_display_mode}", file=sys.stderr)
 
     def emit(obj):
         sys.stdout.write(json.dumps(obj) + "\n")
@@ -134,7 +151,10 @@ async def main():
         os.rename(tmp, FRAME_PATH)
         frame_count += 1
         if frame_count % 15 == 0:
-            cached_title = await page.title()
+            try:
+                cached_title = await page.title()
+            except Exception:
+                pass
         capture_done_mono_ms = round(t_capture_done * 1000, 2)
         emit_frame({"frame": True, "title": cached_title, "url": page.url,
                     "pressure": mode == "interactive" or target_fps < fps_max,
@@ -271,13 +291,17 @@ async def main():
             sw = params.get("screen_width", 1920)
             sh = params.get("screen_height", 1080)
             binary_path = ensure_binary()
-            chrome_args = get_default_stealth_args()
+            chrome_args = get_default_stealth_args() + _ublock_ext_args
+            if _display_mode == "headed-offscreen":
+                chrome_args.append("--ozone-platform=x11")
             context_opts = dict(
                 user_data_dir=str(user_data_dir),
                 executable_path=binary_path,
-                headless=True,
+                headless=_use_headless,
                 args=chrome_args,
-                ignore_default_args=IGNORE_DEFAULT_ARGS + ["--mute-audio"],
+                ignore_default_args=IGNORE_DEFAULT_ARGS + [
+                    "--mute-audio", "--disable-extensions",
+                ],
                 viewport={"width": width, "height": height},
                 screen={"width": sw, "height": sh},
                 accept_downloads=False,
@@ -416,7 +440,10 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
                 await page.goto(url, wait_until="domcontentloaded", timeout=10000)
             except Exception:
                 pass  # Timeout or nav error — page state visible via screenshots.
-            cached_title = await page.title()
+            try:
+                cached_title = await page.title()
+            except Exception:
+                pass
             return {"ok": True}
 
         # Mousemove: fire-and-forget CDP (isTrusted=true for CSS :hover).
@@ -505,7 +532,10 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
                 await page.go_back(wait_until="domcontentloaded", timeout=5000)
             except Exception:
                 pass
-            cached_title = await page.title()
+            try:
+                cached_title = await page.title()
+            except Exception:
+                pass
             return {"ok": True}
 
         if cmd == "forward":
@@ -513,7 +543,10 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
                 await page.go_forward(wait_until="domcontentloaded", timeout=5000)
             except Exception:
                 pass
-            cached_title = await page.title()
+            try:
+                cached_title = await page.title()
+            except Exception:
+                pass
             return {"ok": True}
 
         if cmd == "refresh":
@@ -521,7 +554,10 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
                 await page.reload(wait_until="domcontentloaded", timeout=10000)
             except Exception:
                 pass
-            cached_title = await page.title()
+            try:
+                cached_title = await page.title()
+            except Exception:
+                pass
             return {"ok": True}
 
         if cmd == "js":
@@ -611,7 +647,10 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
             if 0 <= idx < len(context.pages):
                 page = context.pages[idx]
                 await page.bring_to_front()
-                cached_title = await page.title()
+                try:
+                    cached_title = await page.title()
+                except Exception:
+                    pass
                 return {"ok": True}
             return {"error": f"tab index out of range: {idx}"}
 
