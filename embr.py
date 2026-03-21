@@ -2,6 +2,7 @@
 """embr daemon: headless Chromium controlled via JSON over stdin/stdout."""
 
 import asyncio
+import base64
 import json
 import os
 import sys
@@ -20,6 +21,7 @@ BLOCKLIST_PATH = DATA_DIR / "blocklist.txt"
 class PerfLog:
     """Lightweight JSONL performance logger.  No-op when disabled."""
 
+    SCHEMA_VERSION = 2
     INTERACTIVE_CMDS = {
         "mousemove", "click", "mousedown", "mouseup", "key", "type", "scroll",
     }
@@ -30,6 +32,7 @@ class PerfLog:
         self.frame_id = 0
         self.last_frame_emit_ts = None
         self.last_interactive_input_ts = None
+        self.source = "unknown"
         self._file = None
 
     def enable(self):
@@ -40,6 +43,9 @@ class PerfLog:
         if not self.enabled:
             return
         fields["event"] = event
+        fields["schema_version"] = self.SCHEMA_VERSION
+        fields["event_version"] = 1
+        fields["frame_source"] = self.source
         fields["ts_ms"] = round(time.monotonic() * 1000, 2)
         self._file.write(json.dumps(fields) + "\n")
 
@@ -100,6 +106,19 @@ async def main():
     stable_frames = 0
     adapt_cooldown = 0
     last_rendered_frame_id = 0
+
+    # Screencast state.
+    frame_source = "auto"
+    cdp_session = None
+    screencast_active = False
+    screencast_errors = 0
+    SCREENCAST_MAX_ERRORS = 5
+    title_refresh_task = None
+    _fallback_pending = False
+    _last_screencast_frame_ts = 0.0
+    _pending_frame_data = None
+    _ack_ok_count = 0
+    _ack_ok_logged = 0
 
     data_dir = Path.home() / ".local" / "share" / "embr"
     user_data_dir = data_dir / "chromium-profile"
@@ -252,6 +271,276 @@ async def main():
             else:
                 await asyncio.sleep(0.05)
 
+    # ── Screencast transport ───────────────────────────────────────
+
+    async def start_screencast():
+        """Open a CDP session on the current page and start screencast."""
+        nonlocal cdp_session, screencast_active, screencast_errors
+        nonlocal _last_screencast_frame_ts, _fallback_pending
+        nonlocal _pending_frame_data, _ack_ok_count, _ack_ok_logged
+        try:
+            cdp_session = await page.context.new_cdp_session(page)
+            await cdp_session.send("Page.enable")
+            every_nth = max(1, round(60 / target_fps))
+            cdp_session.on("Page.screencastFrame", on_screencast_frame)
+            await cdp_session.send("Page.startScreencast", {
+                "format": "jpeg",
+                "quality": jpeg_quality,
+                "maxWidth": page.viewport_size["width"],
+                "maxHeight": page.viewport_size["height"],
+                "everyNthFrame": every_nth,
+            })
+            screencast_active = True
+            screencast_errors = 0
+            _ack_ok_count = 0
+            _ack_ok_logged = 0
+            _fallback_pending = False
+            _pending_frame_data = None
+            _last_screencast_frame_ts = time.monotonic()
+            start_title_refresh()
+            print("embr: frame_source=screencast", file=sys.stderr)
+        except Exception as e:
+            screencast_active = False
+            if cdp_session:
+                try:
+                    await cdp_session.detach()
+                except Exception:
+                    pass
+            cdp_session = None
+            raise RuntimeError(f"screencast start failed: {e}") from e
+
+    def _check_screencast_threshold():
+        """Trigger fallback or stop if errors exceed threshold."""
+        nonlocal _fallback_pending
+        if screencast_errors < SCREENCAST_MAX_ERRORS:
+            return
+        if _fallback_pending:
+            return
+        _fallback_pending = True
+        if frame_source == "auto":
+            asyncio.ensure_future(fallback_to_screenshot(
+                f"too many errors ({screencast_errors})"))
+        elif frame_source == "screencast":
+            asyncio.ensure_future(_stop_screencast_with_error(
+                f"screencast failed: {screencast_errors} errors exceeded threshold"))
+
+    async def _stop_screencast_with_error(reason):
+        """Stop screencast in forced mode and notify Emacs.
+
+        Emits a screencast_error notification (not a command response)
+        so it cannot desync the single-callback protocol.
+        """
+        perf.log("screencast_error", reason=reason)
+        print(f"embr: {reason}", file=sys.stderr)
+        await stop_screencast()
+        emit({"screencast_error": reason})
+
+    def _on_ack_done(fut):
+        """Done callback for screencast frame ack futures."""
+        nonlocal screencast_errors, _ack_ok_count
+        exc = fut.exception()
+        if not exc:
+            _ack_ok_count += 1
+            return
+        # Ignore ack failures from intentionally stopped sessions
+        # (tab switch, quit, etc.) to avoid false threshold trips.
+        if not screencast_active:
+            return
+        screencast_errors += 1
+        perf.log("screencast_ack_error", error=str(exc),
+                 error_count=screencast_errors)
+        print(f"embr: screencast ack error: {exc}", file=sys.stderr)
+        _check_screencast_threshold()
+
+    def _flush_pending_frame(now):
+        """Decode+write+emit the latest buffered screencast frame."""
+        nonlocal _pending_frame_data
+        if _pending_frame_data is None:
+            return
+        jpg_bytes = base64.b64decode(_pending_frame_data)
+        _pending_frame_data = None
+        tmp = FRAME_PATH + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(jpg_bytes)
+        os.rename(tmp, FRAME_PATH)
+        fid = perf.next_frame_id()
+        capture_done_mono_ms = round(now * 1000, 2)
+        emit_frame({"frame": True, "title": cached_title, "url": page.url,
+                    "pressure": mode == "interactive",
+                    "frame_id": fid,
+                    "capture_done_mono_ms": capture_done_mono_ms})
+        # Perf logging (symmetric with write_frame).
+        emit_fields = dict(frame_id=fid, mode="screencast",
+                           jpeg_quality=jpeg_quality,
+                           bytes=len(jpg_bytes),
+                           ack_ok=_ack_ok_count,
+                           ack_errors=screencast_errors)
+        if perf.last_frame_emit_ts is not None:
+            emit_fields["interval_ms"] = round(
+                (now - perf.last_frame_emit_ts) * 1000, 2)
+        if perf.last_interactive_input_ts is not None:
+            emit_fields["input_to_frame_ms"] = round(
+                (now - perf.last_interactive_input_ts) * 1000, 2)
+            perf.last_interactive_input_ts = None
+        perf.log("frame_emit", **emit_fields)
+        perf.last_frame_emit_ts = now
+        # Batched ack-ok event (one per flush cycle, not per ack).
+        nonlocal _ack_ok_logged
+        ok_since = _ack_ok_count - _ack_ok_logged
+        if ok_since > 0:
+            perf.log("screencast_ack_ok", count=ok_since)
+            _ack_ok_logged = _ack_ok_count
+
+    def on_screencast_frame(params):
+        """Handle a pushed screencast frame from the browser.
+
+        Acks CDP immediately.  Buffers raw frame data (queue depth 1,
+        latest wins).  Only decodes+writes+emits at frame budget
+        intervals; intermediate frames are discarded unprocessed.
+        """
+        nonlocal frame_count, screencast_errors
+        nonlocal _last_screencast_frame_ts, _pending_frame_data
+        try:
+            frame_count += 1
+            _last_screencast_frame_ts = time.monotonic()
+            # Ack immediately so CDP backpressure stays healthy.
+            if cdp_session:
+                fut = asyncio.ensure_future(
+                    cdp_session.send("Page.screencastFrameAck",
+                                     {"sessionId": params["sessionId"]}))
+                fut.add_done_callback(_on_ack_done)
+            # Buffer raw data (latest wins, previous discarded).
+            _pending_frame_data = params["data"]
+            # Throttle: only decode+write+emit at frame budget intervals.
+            now = time.monotonic()
+            if perf.last_frame_emit_ts is not None:
+                if (now - perf.last_frame_emit_ts) < (1.0 / target_fps):
+                    perf.log("frame_drop", reason="screencast_throttle",
+                             frame_id=perf.frame_id + 1)
+                    return
+            _flush_pending_frame(now)
+        except Exception as e:
+            screencast_errors += 1
+            print(f"embr: screencast frame error: {e}", file=sys.stderr)
+            _check_screencast_threshold()
+
+    async def stop_screencast():
+        """Stop screencast and detach CDP session.  Idempotent.
+
+        Sets screencast_active = False immediately (before any awaits)
+        so in-flight ack callbacks see the stopped state and skip error
+        counting.  Does NOT clear _fallback_pending; that flag stays
+        latched until start_screencast resets it on a clean session start.
+        """
+        nonlocal cdp_session, screencast_active, title_refresh_task
+        was_active = screencast_active
+        screencast_active = False
+        if title_refresh_task and not title_refresh_task.done():
+            title_refresh_task.cancel()
+            title_refresh_task = None
+        if cdp_session:
+            try:
+                if was_active:
+                    await cdp_session.send("Page.stopScreencast")
+                await cdp_session.detach()
+            except Exception:
+                pass
+            cdp_session = None
+
+    async def fallback_to_screenshot(reason="unknown"):
+        """One-way fallback from screencast to screenshot polling."""
+        nonlocal loop_task, frame_source
+        # Guard: if another fallback is already running or complete, bail.
+        if frame_source == "screenshot":
+            return
+        perf.log("fallback_trigger", reason=reason,
+                 from_source=frame_source)
+        print(f"embr: frame_source=screenshot (fallback: {reason})",
+              file=sys.stderr)
+        await stop_screencast()
+        frame_source = "screenshot"
+        perf.source = "screenshot"
+        loop_task = asyncio.create_task(screenshot_loop())
+        perf.log("fallback_complete", to_source="screenshot")
+        emit({"screencast_error":
+              f"fell back to screenshot polling ({reason})"})
+
+    def start_title_refresh():
+        """Start async task to refresh title and detect frame stalls."""
+        nonlocal title_refresh_task
+
+        async def _refresh():
+            nonlocal cached_title, _fallback_pending
+            last_check_count = frame_count
+            stall_checks = 0
+            while screencast_active:
+                try:
+                    cached_title = await page.title()
+                except Exception:
+                    pass
+                # Flush any buffered frame that hasn't been emitted.
+                if _pending_frame_data is not None:
+                    _flush_pending_frame(time.monotonic())
+                # Stall detection: no new frames for 5s (10 * 0.5s).
+                if frame_count == last_check_count:
+                    stall_checks += 1
+                    if stall_checks >= 10 and not _fallback_pending:
+                        perf.log("stall_start",
+                                 stall_duration_s=stall_checks * 0.5)
+                        _fallback_pending = True
+                        if frame_source == "auto":
+                            asyncio.ensure_future(
+                                fallback_to_screenshot("frame stall (5s)"))
+                            break
+                        elif frame_source == "screencast":
+                            asyncio.ensure_future(
+                                _stop_screencast_with_error(
+                                    "screencast stalled: no frames for 5s"))
+                            break
+                else:
+                    if stall_checks > 0:
+                        perf.log("stall_end",
+                                 stall_duration_s=stall_checks * 0.5)
+                    stall_checks = 0
+                    last_check_count = frame_count
+                await asyncio.sleep(0.5)
+
+        title_refresh_task = asyncio.create_task(_refresh())
+
+    def _on_page_crash(crashed_page=None):
+        """Handle page crash by stopping screencast or falling back.
+
+        Only acts if the crashed page is the current active page.
+        Background tab crashes are logged but do not affect the stream.
+        """
+        nonlocal _fallback_pending
+        if crashed_page is not None and crashed_page != page:
+            print("embr: background tab crashed (ignored)", file=sys.stderr)
+            return
+        print("embr: active page crashed", file=sys.stderr)
+        if not screencast_active or _fallback_pending:
+            return
+        _fallback_pending = True
+        if frame_source == "auto":
+            asyncio.ensure_future(fallback_to_screenshot("page crashed"))
+        elif frame_source == "screencast":
+            asyncio.ensure_future(
+                _stop_screencast_with_error("screencast lost: page crashed"))
+
+    async def _restart_screencast_after_tab_change():
+        """Restart screencast on new active page after tab operation.
+        Return error dict in forced mode on failure, None otherwise."""
+        if frame_source == "screenshot" or loop_task:
+            return None
+        try:
+            await start_screencast()
+            return None
+        except Exception as e:
+            if frame_source == "screencast":
+                return {"error": f"screencast restart failed: {e}"}
+            await fallback_to_screenshot(str(e))
+            return None
+
     # ── Mouse handling ──────────────────────────────────────────────
     # Clicks use page.evaluate() (Runtime domain) — never contends
     # with the screenshot loop's Page.captureScreenshot traffic.
@@ -280,10 +569,14 @@ async def main():
 
     async def handle(cmd, params):
         nonlocal context, page, running, loop_task, target_fps, jpeg_quality, cached_title
-        nonlocal input_priority_window_s
+        nonlocal input_priority_window_s, frame_source
         nonlocal adaptive_enabled, fps_min, fps_max, quality_min, quality_max
 
         if cmd == "init":
+            # Validate frame_source before any heavy work.
+            frame_source = params.get("frame_source", "auto")
+            if frame_source not in ("auto", "screenshot", "screencast"):
+                return {"error": f"invalid frame_source: {frame_source!r}"}
             if params.get("perf_log"):
                 perf.enable()
             width = params.get("width", 1280)
@@ -310,6 +603,10 @@ async def main():
             if color_scheme:
                 context_opts["color_scheme"] = color_scheme
             context = await pw.chromium.launch_persistent_context(**context_opts)
+            # Attach crash handler to every page (existing and future).
+            for p in context.pages:
+                p.on("crash", _on_page_crash)
+            context.on("page", lambda p: p.on("crash", _on_page_crash))
             # Ad blocking via request interception.
             blocked = load_blocklist()
             if blocked:
@@ -426,8 +723,34 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
                     await page.evaluate("() => {" + _CARET_BODY + "}")
                 except Exception:
                     pass
-            loop_task = asyncio.create_task(screenshot_loop())
-            return {"ok": True, "frame_path": FRAME_PATH}
+
+            # Start frame capture (frame_source validated at top of init).
+            active_source = frame_source
+            if frame_source == "screenshot":
+                loop_task = asyncio.create_task(screenshot_loop())
+                print("embr: frame_source=screenshot", file=sys.stderr)
+            elif frame_source == "screencast":
+                try:
+                    await start_screencast()
+                except Exception:
+                    # Tear down browser to prevent zombie state.
+                    await context.close()
+                    context = None
+                    page = None
+                    raise
+            else:  # auto
+                try:
+                    await start_screencast()
+                    active_source = "screencast"
+                except Exception as e:
+                    reason = str(e)
+                    print(f"embr: frame_source=screenshot (fallback: {reason})",
+                          file=sys.stderr)
+                    active_source = "screenshot"
+                    loop_task = asyncio.create_task(screenshot_loop())
+            perf.source = active_source
+            return {"ok": True, "frame_path": FRAME_PATH,
+                    "frame_source": active_source}
 
         if context is None or page is None:
             return {"error": "not initialized — send init first"}
@@ -618,6 +941,8 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
             return {"ok": True}
 
         if cmd == "new-tab":
+            if screencast_active:
+                await stop_screencast()
             new_page = await context.new_page()
             url = params.get("url", "about:blank")
             if url != "about:blank" and not url.startswith(("http://", "https://", "file://")):
@@ -625,14 +950,22 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
             if url != "about:blank":
                 await new_page.goto(url, wait_until="domcontentloaded", timeout=30000)
             page = new_page
+            err = await _restart_screencast_after_tab_change()
+            if err:
+                return err
             return {"ok": True, "tab_index": len(context.pages) - 1}
 
         if cmd == "close-tab":
             if len(context.pages) <= 1:
                 return {"error": "cannot close last tab"}
+            if screencast_active:
+                await stop_screencast()
             await page.close()
             page = context.pages[-1]
             await page.bring_to_front()
+            err = await _restart_screencast_after_tab_change()
+            if err:
+                return err
             return {"ok": True, "tab_index": len(context.pages) - 1}
 
         if cmd == "list-tabs":
@@ -645,8 +978,13 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
         if cmd == "switch-tab":
             idx = params["index"]
             if 0 <= idx < len(context.pages):
+                if screencast_active:
+                    await stop_screencast()
                 page = context.pages[idx]
                 await page.bring_to_front()
+                err = await _restart_screencast_after_tab_change()
+                if err:
+                    return err
                 try:
                     cached_title = await page.title()
                 except Exception:
@@ -656,6 +994,8 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
 
         if cmd == "quit":
             running = False
+            if screencast_active:
+                await stop_screencast()
             if loop_task:
                 loop_task.cancel()
                 try:

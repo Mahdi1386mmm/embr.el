@@ -4,3 +4,7 @@ __pycache__/
 *.elc
 blocklist.txt
 reports/
+canvasmacs/src/
+canvasmacs/pkg/
+canvasmacs/emacs/
+canvasmacs/*.pkg.tar.zst

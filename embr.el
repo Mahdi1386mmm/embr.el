@@ -181,6 +181,15 @@ exceeds the frame budget, and recovers when headroom returns."
   "Minimum JPEG quality the adaptive controller will step down to."
   :type 'integer)
 
+(defcustom embr-frame-source 'auto
+  "How frames are captured from the browser.
+`auto' tries CDP screencast first, falls back to screenshot polling.
+`screenshot' uses the original screenshot polling loop.
+`screencast' requires CDP screencast, errors if unavailable."
+  :type '(choice (const :tag "Auto (screencast with fallback)" auto)
+                 (const :tag "Screenshot polling" screenshot)
+                 (const :tag "Screencast (no fallback)" screencast)))
+
 (defcustom embr-hover-move-threshold-px 0
   "Minimum pixel distance before sending a hover update.
 Filters out sub-pixel jitter.  Higher values reduce CDP traffic
@@ -389,14 +398,19 @@ Respects `embr-display-method' for display modes."
                                                   :array-type 'list
                                                   :null-object nil
                                                   :false-object :false)))
-                (if (alist-get 'frame resp)
-                    ;; Frame notification — just remember the latest one.
-                    (setq last-frame resp)
-                  ;; Command response — dispatch to callback.
-                  (when embr--callback
-                    (let ((cb embr--callback))
-                      (setq embr--callback nil)
-                      (funcall cb resp)))))
+                (cond
+                  ((alist-get 'frame resp)
+                   ;; Frame notification — just remember the latest one.
+                   (setq last-frame resp))
+                  ((alist-get 'screencast_error resp)
+                   ;; Screencast error notification — always show to user.
+                   (message "embr: %s" (alist-get 'screencast_error resp)))
+                  (t
+                   ;; Command response — dispatch to callback.
+                   (when embr--callback
+                     (let ((cb embr--callback))
+                       (setq embr--callback nil)
+                       (funcall cb resp))))))
             (error (message "embr: JSON parse error: %s"
                             (error-message-string err)))))))
     ;; Stash the latest frame for the render timer instead of
@@ -1138,6 +1152,7 @@ If the daemon is already running, just navigate to the new URL."
                        '((dom_caret . t)))
                    ,@(when embr-perf-log
                        '((perf_log . t)))
+                   (frame_source . ,(symbol-name embr-frame-source))
                    (input_priority_window_ms . ,embr-input-priority-window-ms)
                    ,@(when embr-adaptive-capture
                        `((adaptive_capture . t)
@@ -1145,11 +1160,17 @@ If the daemon is already running, just navigate to the new URL."
                          (adaptive_jpeg_quality_min . ,embr-adaptive-jpeg-quality-min)))))))
 
       (if (alist-get 'error resp)
-          (error "embr: init failed: %s" (alist-get 'error resp))
+          (progn
+            (when (and embr--process (process-live-p embr--process))
+              (delete-process embr--process))
+            (setq embr--process nil)
+            (error "embr: init failed: %s" (alist-get 'error resp)))
         ;; Daemon tells us where it writes frames.
         (setq embr--frame-path (alist-get 'frame_path resp))
         (embr--hover-start)
-        (embr--render-start))))
+        (embr--render-start)
+        (message "embr: frame source: %s"
+                 (or (alist-get 'frame_source resp) "unknown")))))
   ;; Show buffer and navigate.
   (switch-to-buffer embr--buffer)
   (embr-navigate url))

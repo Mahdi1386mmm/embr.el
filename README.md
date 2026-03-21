@@ -3,7 +3,7 @@
 
 > **2026-03-20:** Starting in 0.40, embr has migrated from Camoufox/Firefox to [CloakBrowser](https://cloakbrowser.dev)/Chromium. Thanks to [this helpful suggestion](https://www.reddit.com/r/emacs/comments/1ry1q5q/comment/obkg39k/) for pointing us in the right direction. The new engine brings better performance and native CDP support. See [Migrating from 0.30 to 0.40](#migrating-from-030-to-040) for upgrade instructions.
 
-Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakbrowser.dev) is the renderer.
+Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakbrowser.dev) is the renderer. Frame transport uses CDP screencast by default (`embr-frame-source` = `auto`), with automatic fallback to screenshot polling if screencast is unavailable.
 
 ![embr screenshot](assets/screenshot.png)
 
@@ -138,7 +138,18 @@ rm -rf ~/.local/share/embr ~/.cache/camoufox
 | `embr-hover-move-threshold-px` | integer | `0` | Minimum pixel distance before sending a hover update. Filters sub-pixel jitter. |
 | `embr-hover-rate-min` | integer | `14` | Minimum hover rate (Hz) under load pressure. Hover self-throttles from `embr-hover-rate` to this. |
 | `embr-external-command` | string | yt-dlp + mpv | Shell command for `&` key (`%s` = URL). Default pipes through yt-dlp into mpv. |
+| `embr-frame-source` | symbol | `'auto` | `'auto` tries CDP screencast first, falls back to screenshot polling. `'screenshot` uses polling only. `'screencast` requires CDP screencast, errors if unavailable. |
 | `embr-display-method` | symbol | `'headless` | `'headless` (no window, no audio), `'headed` (visible window, audio), `'headed-offscreen` (hidden window via Xvfb, audio). |
+
+### Reverting to screenshot polling
+
+If CDP screencast causes issues (frame stalls, visual glitches), set `embr-frame-source` to `screenshot` to use the original polling transport:
+
+```elisp
+(setq embr-frame-source 'screenshot)
+```
+
+Then restart embr (`C-c q`, then `M-x embr-browse`). This takes effect immediately on the next session. In `auto` mode (the default), the daemon attempts screencast first and falls back to screenshot automatically if it fails.
 
 ## Usage
 
