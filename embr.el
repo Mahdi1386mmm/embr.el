@@ -120,14 +120,14 @@ Useful for sites that rely on press-and-hold interactions."
   :type '(choice (const :tag "Atomic (single click call)" atomic)
                  (const :tag "Immediate (mousedown/mouseup)" immediate)))
 
-(defcustom embr-scroll-method 'smooth
+(defcustom embr-scroll-method 'instant
   "How scrolling behaves.
-`smooth' scrolls with CSS smooth behavior.
-`instant' scrolls instantly (choppy, line-by-line feel)."
+`instant' scrolls instantly.
+`smooth' scrolls with CSS smooth behavior."
   :type '(choice (const :tag "Smooth" smooth)
                  (const :tag "Instant" instant)))
 
-(defcustom embr-scroll-step 300
+(defcustom embr-scroll-step 100
   "Scroll distance in pixels per wheel notch."
   :type 'integer)
 
@@ -182,13 +182,13 @@ exceeds the frame budget, and recovers when headroom returns."
   "Minimum JPEG quality the adaptive controller will step down to."
   :type 'integer)
 
-(defcustom embr-frame-source 'screencast
+(defcustom embr-frame-source 'auto
   "How frames are captured from the browser.
-`screencast' uses CDP screencast push (recommended).
 `auto' tries CDP screencast first, falls back to screenshot polling.
+`screencast' requires CDP screencast, errors if unavailable.
 `screenshot' uses the original screenshot polling loop."
-  :type '(choice (const :tag "Screencast (recommended)" screencast)
-                 (const :tag "Auto (screencast with fallback)" auto)
+  :type '(choice (const :tag "Auto (screencast with fallback)" auto)
+                 (const :tag "Screencast (no fallback)" screencast)
                  (const :tag "Screenshot polling" screenshot)))
 
 (defcustom embr-hover-move-threshold-px 0

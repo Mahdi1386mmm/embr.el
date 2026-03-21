@@ -7,8 +7,6 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
 
 ![embr screenshot](assets/screenshot.png)
 
-If you built a recent Emacs with the experimental [canvas patches](https://github.com/minad/emacs-canvas-patch), embr will detect it at startup and use a native canvas render path (JPEG decode straight to pixel buffer, no disk round-trip). Runs great without it too. Arch users can check `./canvasmacs` for a ready-made PKGBUILD.
-
 ## Prerequisites
 
 - Python 3.10+
@@ -32,8 +30,10 @@ If you built a recent Emacs with the experimental [canvas patches](https://githu
         embr-screen-height 1080
         embr-color-scheme 'dark
         embr-search-engine 'google
-        embr-scroll-method 'smooth
-        embr-scroll-step 300
+        embr-scroll-method 'instant
+        embr-scroll-step 100
+        embr-frame-source 'auto
+        embr-render-backend 'auto
         embr-display-method 'headless))
 ```
 
@@ -53,8 +53,10 @@ If you built a recent Emacs with the experimental [canvas patches](https://githu
         embr-screen-height 1080
         embr-color-scheme 'dark
         embr-search-engine 'google
-        embr-scroll-method 'smooth
-        embr-scroll-step 300
+        embr-scroll-method 'instant
+        embr-scroll-step 100
+        embr-frame-source 'auto
+        embr-render-backend 'auto
         embr-display-method 'headless))
 ```
 
@@ -111,8 +113,8 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-color-scheme` | symbol/nil | `'dark` | `'dark`, `'light`, or `nil` to let CloakBrowser choose. Controls `prefers-color-scheme`. |
 | `embr-search-engine` | symbol/string | `'google` | `'google`, `'brave`, `'duckduckgo`, or custom URL with `%s` |
 | `embr-click-method` | symbol | `'immediate` | `'atomic` defers mousedown until drag detected, better iframe compat. `'immediate` sends mousedown instantly, for press-and-hold sites. |
-| `embr-scroll-method` | symbol | `'smooth` | `'smooth` scrolls with CSS animation. `'instant` scrolls instantly, line-by-line feel. |
-| `embr-scroll-step` | integer | `300` | Scroll distance in pixels per wheel notch |
+| `embr-scroll-method` | symbol | `'instant` | `'instant` scrolls instantly. `'smooth` scrolls with CSS animation. |
+| `embr-scroll-step` | integer | `100` | Scroll distance in pixels per wheel notch |
 | `embr-dom-caret-hack` | boolean | `t` | Inject a fake DOM caret in focused text fields. CDP screenshots don't capture the native caret. |
 | `embr-perf-log` | boolean | `nil` | Write JSONL perf events to `/tmp/embr-perf.jsonl`. Analyze with `tools/embr-perf-report.py`. |
 | `embr-input-priority-window-ms` | integer | `35` | Milliseconds to suppress frame capture after interactive input. Frees CDP pipe for input commands. 0 to disable. |
@@ -122,7 +124,7 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-hover-move-threshold-px` | integer | `0` | Minimum pixel distance before sending a hover update. Filters sub-pixel jitter. |
 | `embr-hover-rate-min` | integer | `14` | Minimum hover rate (Hz) under load pressure. Hover self-throttles from `embr-hover-rate` to this. |
 | `embr-external-command` | string | yt-dlp + mpv | Shell command for `&` key (`%s` = URL). Default pipes through yt-dlp into mpv. |
-| `embr-frame-source` | symbol | `'screencast` | `'screencast` uses CDP screencast push (recommended). `'auto` tries screencast first, falls back to screenshot polling. `'screenshot` uses polling only. |
+| `embr-frame-source` | symbol | `'auto` | `'auto` tries CDP screencast first, falls back to screenshot polling. `'screencast` requires screencast, errors if unavailable. `'screenshot` uses polling only. |
 | `embr-render-backend` | symbol | `'auto` | `'auto` uses canvas if available, falls back to legacy. `'legacy` uses JPEG file + create-image. `'canvas` requires canvas-patched Emacs + native module. |
 | `embr-display-method` | symbol | `'headless` | `'headless` (no window, no audio), `'headed` (visible window, audio), `'headed-offscreen` (hidden window via Xvfb, audio). |
 
@@ -231,6 +233,10 @@ For full cosmetic filtering, element hiding, and script-level ad blocking (e.g. 
    ```elisp
    (setq embr-display-method 'headed-offscreen)
    ```
+
+## Emacs Canvas
+
+If you built a recent Emacs with the experimental [canvas patches](https://github.com/minad/emacs-canvas-patch), embr will detect it at startup and use a native canvas render path (JPEG decode straight to pixel buffer, no disk round-trip). Runs great without it too. Arch users can check `./canvasmacs` for a PKGBUILD that builds `emacs-wayland` with the canvas patches applied.
 
 ## FAQ
 
