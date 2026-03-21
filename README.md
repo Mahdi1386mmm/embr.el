@@ -103,8 +103,6 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 |----------|------|---------|-------------|
 | `embr-python` | file | `~/.local/share/embr/.venv/bin/python` | Path to Python interpreter in the embr venv. |
 | `embr-script` | file | `embr.py` in package dir | Path to the embr.py daemon script. |
-| `embr-fps` | integer | `60` | Target frames per second |
-| `embr-jpeg-quality` | integer | `80` | JPEG quality (1-100). Lower = smaller frames, less CDP contention, worse image. 50 halves frame size. |
 | `embr-hover-rate` | integer | `60` | Mouse hover tracking rate in Hz. |
 | `embr-default-width` | integer | `1280` | Viewport width in pixels |
 | `embr-default-height` | integer | `720` | Viewport height in pixels |
@@ -117,26 +115,12 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-scroll-step` | integer | `100` | Scroll distance in pixels per wheel notch |
 | `embr-dom-caret-hack` | boolean | `t` | Inject a fake DOM caret in focused text fields. CDP screenshots don't capture the native caret. |
 | `embr-perf-log` | boolean | `nil` | Write JSONL perf events to `/tmp/embr-perf.jsonl`. Analyze with `tools/embr-perf-report.py`. |
-| `embr-input-priority-window-ms` | integer | `35` | Milliseconds to suppress frame capture after interactive input. Frees CDP pipe for input commands. 0 to disable. |
-| `embr-adaptive-capture` | boolean | `nil` | Auto-tune FPS and JPEG quality based on capture cost. Lowers when over budget, recovers when stable. |
-| `embr-adaptive-fps-min` | integer | `40` | Minimum FPS the adaptive controller will step down to. |
-| `embr-adaptive-jpeg-quality-min` | integer | `65` | Minimum JPEG quality the adaptive controller will step down to. |
 | `embr-hover-move-threshold-px` | integer | `0` | Minimum pixel distance before sending a hover update. Filters sub-pixel jitter. |
-| `embr-hover-rate-min` | integer | `14` | Minimum hover rate (Hz) under load pressure. Hover self-throttles from `embr-hover-rate` to this. |
 | `embr-external-command` | string | yt-dlp + mpv | Shell command for `&` key (`%s` = URL). Default pipes through yt-dlp into mpv. |
 | `embr-frame-source` | symbol | `'auto` | `'auto` tries CDP screencast first, falls back to screenshot polling. `'screencast` requires screencast, errors if unavailable. `'screenshot` uses polling only. |
 | `embr-render-backend` | symbol | `'auto` | `'auto` uses canvas if available, falls back to legacy. `'legacy` uses JPEG file + create-image. `'canvas` requires canvas-patched Emacs + native module. |
 | `embr-display-method` | symbol | `'headless` | `'headless` (no window, no audio), `'headed` (visible window, audio), `'headed-offscreen` (hidden window via Xvfb, audio). |
 
-### Reverting to screenshot polling
-
-If CDP screencast causes issues (frame stalls, visual glitches), set `embr-frame-source` to `screenshot` to use the original polling transport:
-
-```elisp
-(setq embr-frame-source 'screenshot)
-```
-
-Then restart embr (`C-c q`, then `M-x embr-browse`). This takes effect immediately on the next session. In `auto` mode (the default), the daemon attempts screencast first and falls back to screenshot automatically if it fails.
 
 ## Usage
 

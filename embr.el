@@ -85,15 +85,11 @@ realistic browser fingerprint."
   :type 'integer)
 
 (defcustom embr-fps 60
-  "Target frames per second for the screenshot polling loop.
-Only relevant when `embr-frame-source' is `screenshot'.  In screencast
-mode the browser compositor controls frame rate."
+  "Deprecated. Screenshot-only. Target FPS for the screenshot polling loop."
   :type 'integer)
 
 (defcustom embr-jpeg-quality 80
-  "JPEG quality for screenshot frames (1-100).
-Lower values reduce frame size and CDP pipe contention at the cost
-of image quality.  At 80 frames are ~60KB; at 50 they are ~30KB."
+  "Deprecated. Screenshot-only. JPEG quality (1-100) for screenshot captures."
   :type 'integer)
 
 (defcustom embr-hover-rate 60
@@ -163,23 +159,19 @@ When non-nil, the daemon writes JSONL performance events to
   :type 'boolean)
 
 (defcustom embr-input-priority-window-ms 35
-  "Milliseconds to suppress frame capture after interactive input.
-During this window the daemon drops screenshot captures so the CDP
-pipe is free for input commands.  Set to 0 to disable."
+  "Deprecated. Screenshot-only. Milliseconds to suppress captures after input."
   :type 'integer)
 
 (defcustom embr-adaptive-capture nil
-  "Whether the daemon should auto-tune FPS and JPEG quality.
-When non-nil, the daemon lowers FPS and quality when capture time
-exceeds the frame budget, and recovers when headroom returns."
+  "Deprecated. Screenshot-only. Auto-tune FPS and JPEG quality."
   :type 'boolean)
 
 (defcustom embr-adaptive-fps-min 40
-  "Minimum FPS the adaptive controller will step down to."
+  "Deprecated. Screenshot-only. Minimum FPS for adaptive controller."
   :type 'integer)
 
 (defcustom embr-adaptive-jpeg-quality-min 65
-  "Minimum JPEG quality the adaptive controller will step down to."
+  "Deprecated. Screenshot-only. Minimum JPEG quality for adaptive controller."
   :type 'integer)
 
 (defcustom embr-frame-source 'auto
@@ -198,9 +190,7 @@ at the cost of hover precision."
   :type 'integer)
 
 (defcustom embr-hover-rate-min 14
-  "Minimum hover rate in Hz when the daemon signals load pressure.
-The hover timer runs at `embr-hover-rate' normally, but self-throttles
-to this rate when the daemon is under input pressure."
+  "Deprecated. Screenshot-only. Minimum hover rate under load pressure."
   :type 'integer)
 
 (defcustom embr-render-backend 'auto
