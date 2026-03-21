@@ -80,7 +80,7 @@ All management is done from Emacs, no terminal needed.
 | `M-x embr-setup-or-update-all` | Install or update CloakBrowser + ad blocklist + uBlock Origin (runs `setup.sh --all`) |
 | `M-x embr-update-blocklist` | Update the ad/tracker domain blocklist |
 | `M-x embr-update-ublock` | Update uBlock Origin to the latest release |
-| `M-x embr-uninstall` | Remove venv and browser profile; optionally delete browser cache (runs `uninstall.sh`) |
+| `M-x embr-uninstall` | Remove venv and browser profile. Optionally delete browser cache (runs `uninstall.sh`). |
 | `M-x embr-info` | Show diagnostic info about the installation |
 
 The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's always safe to re-run for both first install and updates.
@@ -93,7 +93,7 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | Browser binary | `~/.cache/cloakbrowser/` | `~/.cache/camoufox/` |
 | Cookies & sessions | `~/.local/share/embr/chromium-profile/` | `~/.local/share/embr/firefox-profile/` |
 
-`M-x embr-uninstall` removes the venv and profile; browser cache deletion is offered as an optional prompt.
+`M-x embr-uninstall` removes the venv and profile. Browser cache deletion is offered as an optional prompt.
 
 ### Migrating from 0.30 to 0.40
 
@@ -141,14 +141,14 @@ rm -rf ~/.local/share/embr ~/.cache/camoufox
 ## Usage
 
 ```
-M-x embr-browse RET https://example.com RET
+M-x embr-browse RET example.com RET
 ```
 
 ## Keybindings
 
 All keys are forwarded directly to the browser. Typing, arrows, backspace, tab, and enter work as expected. `C-x`, `M-x`, etc. stay free for Emacs.
 
-The top-level keybindings below translate familiar Emacs motion keys into their browser equivalents — if you're familiar with EXWM, same concept as simulation keys.
+The top-level keybindings below translate familiar Emacs motion keys into their browser equivalents. If you're familiar with EXWM, same concept as simulation keys.
 
 | Key | Action |
 |-----|--------|
@@ -176,7 +176,7 @@ The top-level keybindings below translate familiar Emacs motion keys into their 
 
 ### Browser commands
 
-Browser commands use the `C-c` prefix — eww-inspired commands, just behind a prefix instead of on top-level keys. This gives a more natural browser typing experience while keeping power tools a combo away.
+Browser commands use the `C-c` prefix. Eww-inspired commands, just behind a prefix instead of on top-level keys. This gives a more natural browser typing experience while keeping power tools a combo away.
 
 | Key | Action |
 |-----|--------|
@@ -203,13 +203,13 @@ Standard Emacs bookmarks work: `C-x r m` to save, `C-x r b` to jump.
 
 ## Ad Blocking
 
-A **domain-level blocklist** using the [StevenBlack/hosts](https://github.com/StevenBlack/hosts) list (~82K ad and tracker domains) is included out of the box. Requests to blocked domains are intercepted and killed before they hit the network. The blocklist is downloaded by `setup.sh` and refreshed alongside the CloakBrowser binary every time you run `M-x embr-setup-or-update-all` — run it periodically to keep both up to date.
+A **domain-level blocklist** using the [StevenBlack/hosts](https://github.com/StevenBlack/hosts) list (~82K ad and tracker domains) is included out of the box. Requests to blocked domains are intercepted and killed before they hit the network. The blocklist is downloaded by `setup.sh` and refreshed alongside the CloakBrowser binary every time you run `M-x embr-setup-or-update-all`. Run it periodically to keep both up to date.
 
 ### uBlock Origin (optional)
 
-For full cosmetic filtering, element hiding, and script-level ad blocking (e.g. YouTube ads), you can install [uBlock Origin](https://github.com/gorhill/uBlock) as a Chromium extension. Headless Chromium does not support extensions, so this requires a one-time setup in headed mode. `M-x embr-setup-or-update-all` downloads the latest uBlock Origin release for you — you just need to enable it once.
+For full cosmetic filtering, element hiding, and script-level ad blocking (e.g. YouTube ads), you can install [uBlock Origin](https://github.com/gorhill/uBlock) as a Chromium extension. Headless Chromium does not support extensions, so this requires a one-time setup in headed mode. `M-x embr-setup-or-update-all` downloads the latest uBlock Origin release for you. You just need to enable it once.
 
-1. **Install Xvfb** (if you don't have it — needed for `headed-offscreen` mode):
+1. **Install Xvfb** (if you don't have it, needed for `headed-offscreen` mode):
 
    ```sh
    # Arch
@@ -226,50 +226,13 @@ For full cosmetic filtering, element hiding, and script-level ad blocking (e.g. 
    (setq embr-display-method 'headed)
    ```
 
-3. **Enable the extension** — restart embr, navigate to `chrome://extensions`, turn on **Developer mode** (top-right toggle), then click **Load unpacked** and select `~/.local/share/embr/extensions/ublock/uBlock0.chromium`. This is a one-time step — the extension persists in your browser profile across restarts.
+3. **Enable the extension.** Navigate to `chrome://extensions`, turn on **Developer mode** (top-right toggle), and enable uBlock Origin if it is not already active.
 
-4. **Switch to headed-offscreen** to hide the browser window while keeping extensions and audio:
+4. **Switch to headed-offscreen** and restart embr. The extension persists in your browser profile across restarts.
 
    ```elisp
    (setq embr-display-method 'headed-offscreen)
    ```
-
-## How It Works
-
-Emacs spawns a Python subprocess (`embr.py`) that controls headless Chromium through [CloakBrowser](https://cloakbrowser.dev) (a stealth Chromium with source-level fingerprint patches). They communicate via JSON lines over stdin/stdout. The daemon streams JPEG screenshots via a temp file on disk, giving live visual feedback.
-
-Browser sessions persist across restarts. Cookies and login state are stored in `~/.local/share/embr/chromium-profile/`.
-
-### Avoiding CDP deadlocks
-
-The browser is controlled via the Chrome DevTools Protocol (CDP) over a single pipe. Screenshot capture (`Page.captureScreenshot`) sends ~60KB per frame and dominates the pipe's bandwidth. Mouse and keyboard input (`Input.dispatch*`) must share the same pipe.
-
-Under video playback, screenshot traffic can starve input commands — a CDP `Input.dispatchMouseEvent` call may hang indefinitely waiting for pipe bandwidth, freezing all mouse interaction while the video keeps playing.
-
-embr uses several strategies to prevent this:
-
-- **Decoupled rendering**: The Emacs process filter stashes the latest frame instead of rendering synchronously. A timer renders frames at a capped rate, giving the Emacs event loop idle time to process user input between frames.
-- **Batch-read with mousemove coalescing**: The daemon reads all pending stdin commands at once and collapses consecutive `mousemove` messages down to one, preventing hover traffic (`embr-hover-rate` Hz, default 20) from starving real commands like clicks and navigation.
-- **Split CDP domains for input**: Click events are dispatched via `page.evaluate()` (Runtime domain) instead of `page.mouse.*()` (Input domain), so they don't contend with screenshot traffic. Mousedown and mouseup use CDP Input domain (`page.mouse.down()`/`page.mouse.up()`) for `isTrusted=true` native text selection — they are fire-and-forget and infrequent (one per drag). Scroll uses `page.evaluate()` (Runtime domain).
-- **Fire-and-forget mousemove**: Hover tracking uses CDP `page.mouse.move()` (for `isTrusted=true` CSS `:hover` support) but as a cancel-and-replace background task — each new move cancels the previous in-flight one. A hung move can never block screenshots, clicks, or the command loop.
-- **Fire-and-forget keyboard/scroll**: Keyboard and scroll commands run as independent asyncio tasks. Keyboard uses `page.keyboard.type()`/`page.keyboard.press()` (CDP Input domain) for `isTrusted=true` events; scroll uses `page.evaluate()` (Runtime domain). Both are fire-and-forget and cannot block each other or the command loop.
-- **Title caching**: `page.title()` is queried once per second instead of every frame, halving per-frame CDP traffic.
-- **Safety timeout**: A 35-second outer timeout on the command loop ensures that even if a navigation or page load hangs, the daemon recovers and continues processing input.
-
-The net effect: video playback stays smooth, mouse hover updates CSS `:hover` state correctly, and clicks/keyboard/scroll never hang regardless of screenshot throughput. Click events are JavaScript-dispatched (`isTrusted=false`), which works for most sites but may not trigger browser-gated actions like the Fullscreen API.
-
-### Keyboard-driven browsing
-
-The keyboard flow does not hit the deadlock conditions because:
-
-1. **No continuous CDP Input traffic** — the hover timer is silent when the mouse isn't moving, so zero background `page.mouse.move()` calls competing with screenshots.
-2. **No shared mutable state** — keyboard events are independent (no position/button state to corrupt between concurrent calls).
-3. **One-off not sustained** — a key press is a single CDP call, not 20/sec like hover. Even under full screenshot load, it finds a gap within one frame cycle (~60ms).
-4. **Fire-and-forget** — even if a key event lags, nothing blocks. The command loop continues, screenshots continue, and the next key press goes through independently.
-
-The mouse deadlock chain was always: sustained hover traffic (20 Hz) + screenshot traffic (60 Hz) = saturated pipe → any additional CDP Input call hangs → cascading failure. Keyboard-only removes the sustained part entirely. You go from ~80 CDP calls/sec (60 screenshot + 20 hover) down to ~60 (just screenshots) with occasional key presses that slip through the gaps.
-
-The full keyboard flow: `C-n`/`C-p` to scroll, `C-c h` for Vimium-style link hints, `Tab` to cycle form fields, `C-s` to find text, `C-c l` to navigate. See [Keybindings](#keybindings) for the complete list.
 
 ## FAQ
 
