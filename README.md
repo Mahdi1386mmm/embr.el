@@ -185,15 +185,19 @@ Browser commands use the `C-c` prefix. Eww-inspired commands, just behind a pref
 
 Standard Emacs bookmarks work: `C-x r m` to save, `C-x r b` to jump.
 
+## Updating
+
+Run `M-x embr-setup-or-update-all` periodically. It updates the browser binary (important for security), the Python venv and Playwright, the domain blocklist, and uBlock Origin. You can also update individual components with `M-x embr-update-blocklist` or `M-x embr-update-ublock`.
+
 ## Ad Blocking
 
-Two layers of ad blocking are available. Running `M-x embr-setup-or-update-all` periodically keeps everything up to date. You can also update each layer individually with `M-x embr-update-blocklist` or `M-x embr-update-ublock`.
+Two layers of ad blocking are available.
 
 **Domain-level blocklist** (built in). The [StevenBlack/hosts](https://github.com/StevenBlack/hosts) list (~82K ad and tracker domains) intercepts and kills requests to blocked domains before they hit the network.
 
 ### uBlock Origin (optional)
 
-For ad blocking beyond domain-level, you can install [uBlock Origin](https://github.com/gorhill/uBlock) as a Chromium extension. `M-x embr-setup-or-update-all` downloads the latest release for you. You just need to enable it once in headed mode (headless Chromium does not support extensions).
+For ad blocking beyond domain-level, you can install [uBlock Origin](https://github.com/gorhill/uBlock) as a Chromium extension. It is downloaded by `M-x embr-setup-or-update-all` but requires one-time manual setup in headed mode (headless Chromium does not support extensions).
 
 1. **Install Xvfb** (if you don't have it, needed for `headed-offscreen` mode):
 
