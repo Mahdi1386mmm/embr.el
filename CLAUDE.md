@@ -121,5 +121,6 @@ Keybindings are defined near the bottom of `embr.el` in `embr-mode-map`. Printab
 
 ## Keeping Docs in Sync
 
-- **README.md `use-package` blocks**: The Elpaca and straight.el example configs in README.md must list all `defcustom` variables with their default values. When adding, removing, or renaming a config variable, update both `use-package` blocks to match.
-- **README.md tables and keybindings**: After any change to configuration variables (add/remove/rename/default change) or keybindings (add/remove/rebind), update the corresponding Configuration table and Keybindings tables in README.md.
+- **README.md `use-package` blocks**: The example configs show only commonly-tuned settings (e.g. color scheme, search engine, display method) — not every `defcustom`. Keep them minimal and representative.
+- **README.md Configuration table**: All `defcustom` variables with their defaults must appear here. When adding, removing, renaming, or changing a default, update this table.
+- **README.md Keybindings tables**: After any keybinding change (add/remove/rebind), update the corresponding tables.

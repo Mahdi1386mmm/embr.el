@@ -167,7 +167,7 @@ During this window the daemon drops screenshot captures so the CDP
 pipe is free for input commands.  Set to 0 to disable."
   :type 'integer)
 
-(defcustom embr-adaptive-capture t
+(defcustom embr-adaptive-capture nil
   "Whether the daemon should auto-tune FPS and JPEG quality.
 When non-nil, the daemon lowers FPS and quality when capture time
 exceeds the frame budget, and recovers when headroom returns."

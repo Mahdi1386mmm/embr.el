@@ -30,18 +30,8 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
         embr-screen-height 1080
         embr-color-scheme 'dark
         embr-search-engine 'google
-        embr-click-method 'immediate
         embr-scroll-method 'smooth
         embr-scroll-step 300
-        embr-dom-caret-hack t
-        embr-perf-log nil
-        embr-input-priority-window-ms 35
-        embr-adaptive-capture t
-        embr-adaptive-fps-min 40
-        embr-adaptive-jpeg-quality-min 65
-        embr-hover-move-threshold-px 0
-        embr-hover-rate-min 14
-        embr-external-command "yt-dlp -o - %s | mpv -"
         embr-display-method 'headless))
 ```
 
@@ -63,18 +53,8 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
         embr-screen-height 1080
         embr-color-scheme 'dark
         embr-search-engine 'google
-        embr-click-method 'immediate
         embr-scroll-method 'smooth
         embr-scroll-step 300
-        embr-dom-caret-hack t
-        embr-perf-log nil
-        embr-input-priority-window-ms 35
-        embr-adaptive-capture t
-        embr-adaptive-fps-min 40
-        embr-adaptive-jpeg-quality-min 65
-        embr-hover-move-threshold-px 0
-        embr-hover-rate-min 14
-        embr-external-command "yt-dlp -o - %s | mpv -"
         embr-display-method 'headless))
 ```
 
@@ -150,7 +130,7 @@ rm -rf ~/.local/share/embr ~/.cache/camoufox
 | `embr-dom-caret-hack` | boolean | `t` | Inject a fake DOM caret in focused text fields. CDP screenshots don't capture the native caret. |
 | `embr-perf-log` | boolean | `nil` | Write JSONL perf events to `/tmp/embr-perf.jsonl`. Analyze with `tools/embr-perf-report.py`. |
 | `embr-input-priority-window-ms` | integer | `35` | Milliseconds to suppress frame capture after interactive input. Frees CDP pipe for input commands. 0 to disable. |
-| `embr-adaptive-capture` | boolean | `t` | Auto-tune FPS and JPEG quality based on capture cost. Lowers when over budget, recovers when stable. |
+| `embr-adaptive-capture` | boolean | `nil` | Auto-tune FPS and JPEG quality based on capture cost. Lowers when over budget, recovers when stable. |
 | `embr-adaptive-fps-min` | integer | `40` | Minimum FPS the adaptive controller will step down to. |
 | `embr-adaptive-jpeg-quality-min` | integer | `65` | Minimum JPEG quality the adaptive controller will step down to. |
 | `embr-hover-move-threshold-px` | integer | `0` | Minimum pixel distance before sending a hover update. Filters sub-pixel jitter. |
