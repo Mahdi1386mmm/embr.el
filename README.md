@@ -10,7 +10,7 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
 ## Prerequisites
 
 - Python 3.10+
-- Emacs 30.1+ (with image support)
+- Emacs 30.1+
 
 ## Installation
 
@@ -69,7 +69,7 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
 
 ## Setup
 
-After installing, run `M-x embr-setup-or-update-all` to create the Python venv and download CloakBrowser (a stealth Chromium with source-level fingerprint patches).
+After installing, run `M-x embr-setup-or-update-all` to create the Python venv and download CloakBrowser.
 
 If you skip this step, `M-x embr-browse` will detect the missing venv and offer to run setup for you automatically.
 
@@ -240,11 +240,11 @@ For full cosmetic filtering, element hiding, and script-level ad blocking (e.g. 
 
 ### Does audio/video work?
 
-**Video playback works.** Frame rate depends on `embr-fps` (default 60). YouTube may throttle unauthenticated sessions.
+**Video playback works.**
 
 **Audio playback works.** Headless Chromium routes audio through PulseAudio/PipeWire.
 
-**Mic, camera, and screen sharing do not work.** Headless Chromium has no access to input devices.
+**Mic, camera, and screen sharing do not work.**
 
 ### Will you add vim-like modal keybindings (like Vimium)?
 
