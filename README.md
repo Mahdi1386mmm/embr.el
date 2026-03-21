@@ -58,6 +58,8 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
         embr-display-method 'headless))
 ```
 
+**Tip:** Of all the settings available, `embr-hover-rate` is the most mystifying. Higher values (e.g. 60) give lower-latency hover and can help with finicky buttons. Lower values (e.g. 20) reduce CDP traffic and may improve click reliability on slower machines. Setting this too high risks input lockups. Worth fiddling with.
+
 **Tip:** Make embr your default Emacs browser and enable clickable URLs everywhere:
 
 ```elisp
@@ -101,7 +103,7 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 |----------|------|---------|-------------|
 | `embr-python` | file | `~/.local/share/embr/.venv/bin/python` | Path to Python interpreter in the embr venv. |
 | `embr-script` | file | `embr.py` in package dir | Path to the embr.py daemon script. |
-| `embr-hover-rate` | integer | `30` | Mouse hover tracking rate in Hz. |
+| `embr-hover-rate` | integer | `30` | Mouse hover tracking rate in Hz. Higher values (e.g. 60) give lower-latency hover and can help with finicky buttons. Lower values (e.g. 20) reduce CDP traffic and may improve click reliability on slower machines. Setting this too high risks input lockups. |
 | `embr-default-width` | integer | `1280` | Viewport width in pixels |
 | `embr-default-height` | integer | `720` | Viewport height in pixels |
 | `embr-screen-width` | integer | `1920` | Screen width reported to websites (should be >= viewport) |
