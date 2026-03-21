@@ -109,7 +109,7 @@ async def main():
     last_rendered_frame_id = 0
 
     # Screencast state.
-    frame_source = "auto"
+    frame_source = "screencast"
     cdp_session = None
     screencast_active = False
     screencast_errors = 0
@@ -122,7 +122,7 @@ async def main():
     _ack_ok_logged = 0
 
     # Canvas stream state.
-    render_backend = "legacy"
+    render_backend = "default"
     frame_socket_path = None
     frame_socket_server = None
     frame_socket_writer = None
@@ -385,12 +385,8 @@ async def main():
         if _fallback_pending:
             return
         _fallback_pending = True
-        if frame_source == "auto":
-            asyncio.ensure_future(fallback_to_screenshot(
-                f"too many errors ({screencast_errors})"))
-        elif frame_source == "screencast":
-            asyncio.ensure_future(_stop_screencast_with_error(
-                f"screencast failed: {screencast_errors} errors exceeded threshold"))
+        asyncio.ensure_future(_stop_screencast_with_error(
+            f"screencast failed: {screencast_errors} errors exceeded threshold"))
 
     async def _stop_screencast_with_error(reason):
         """Stop screencast in forced mode and notify Emacs.
@@ -521,24 +517,6 @@ async def main():
                 pass
             cdp_session = None
 
-    async def fallback_to_screenshot(reason="unknown"):
-        """One-way fallback from screencast to screenshot polling."""
-        nonlocal loop_task, frame_source
-        # Guard: if another fallback is already running or complete, bail.
-        if frame_source == "screenshot":
-            return
-        perf.log("fallback_trigger", reason=reason,
-                 from_source=frame_source)
-        print(f"embr: frame_source=screenshot (fallback: {reason})",
-              file=sys.stderr)
-        await stop_screencast()
-        frame_source = "screenshot"
-        perf.source = "screenshot"
-        loop_task = asyncio.create_task(screenshot_loop())
-        perf.log("fallback_complete", to_source="screenshot")
-        emit({"screencast_error":
-              f"fell back to screenshot polling ({reason})"})
-
     def start_title_refresh():
         """Start async task to refresh title and flush buffered frames."""
         nonlocal title_refresh_task
@@ -571,11 +549,8 @@ async def main():
         if not screencast_active or _fallback_pending:
             return
         _fallback_pending = True
-        if frame_source == "auto":
-            asyncio.ensure_future(fallback_to_screenshot("page crashed"))
-        elif frame_source == "screencast":
-            asyncio.ensure_future(
-                _stop_screencast_with_error("screencast lost: page crashed"))
+        asyncio.ensure_future(
+            _stop_screencast_with_error("screencast lost: page crashed"))
 
     async def _restart_screencast_after_tab_change():
         """Restart screencast on new active page after tab operation.
@@ -586,10 +561,7 @@ async def main():
             await start_screencast()
             return None
         except Exception as e:
-            if frame_source == "screencast":
-                return {"error": f"screencast restart failed: {e}"}
-            await fallback_to_screenshot(str(e))
-            return None
+            return {"error": f"screencast restart failed: {e}"}
 
     # ── Mouse handling ──────────────────────────────────────────────
     # Clicks use page.evaluate() (Runtime domain) — never contends
@@ -624,11 +596,11 @@ async def main():
 
         if cmd == "init":
             # Validate frame_source and render_backend before any heavy work.
-            frame_source = params.get("frame_source", "auto")
-            if frame_source not in ("auto", "screenshot", "screencast"):
+            frame_source = params.get("frame_source", "screencast")
+            if frame_source not in ("screenshot", "screencast"):
                 return {"error": f"invalid frame_source: {frame_source!r}"}
-            render_backend = params.get("render_backend", "legacy")
-            if render_backend not in ("legacy", "canvas"):
+            render_backend = params.get("render_backend", "default")
+            if render_backend not in ("default", "canvas"):
                 return {"error": f"invalid render_backend: {render_backend!r}"}
             if params.get("perf_log"):
                 perf.enable()
@@ -791,22 +763,12 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
                     context = None
                     page = None
                     raise
-            else:  # auto
-                try:
-                    await start_screencast()
-                    active_source = "screencast"
-                except Exception as e:
-                    reason = str(e)
-                    print(f"embr: frame_source=screenshot (fallback: {reason})",
-                          file=sys.stderr)
-                    active_source = "screenshot"
-                    loop_task = asyncio.create_task(screenshot_loop())
             # Start canvas frame socket if requested.
             if render_backend == "canvas":
                 await start_frame_socket()
                 print(f"embr: render_backend=canvas", file=sys.stderr)
             else:
-                print(f"embr: render_backend=legacy", file=sys.stderr)
+                print(f"embr: render_backend=default", file=sys.stderr)
             perf.source = active_source
             resp = {"ok": True, "frame_path": FRAME_PATH,
                     "frame_source": active_source,

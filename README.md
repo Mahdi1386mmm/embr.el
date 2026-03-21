@@ -1,9 +1,7 @@
 ## embr.el
 **Em**acs **Br**owser
 
-> **2026-03-20:** Starting in 0.40, embr has migrated from Camoufox/Firefox to [CloakBrowser](https://cloakbrowser.dev)/Chromium. Thanks to [this helpful suggestion](https://www.reddit.com/r/emacs/comments/1ry1q5q/comment/obkg39k/) for pointing us in the right direction. The new engine brings better performance and native CDP support. See HOW_TO_UPDATE.md.
-
-Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakbrowser.dev) is the renderer. Frame transport uses CDP screencast by default, with automatic fallback to screenshot polling. On the Emacs side, if you build Emacs with the [canvas patch](https://github.com/minad/emacs-canvas-patch) (see `./canvasmacs`), embr renders frames directly to a pixel buffer via a native C module, skipping the per-frame disk round-trip.
+Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakbrowser.dev) is the renderer. Frame transport uses CDP screencast or screenshot polling (you choose). Emacs canvas (optional) is also supported for added performance. If you build Emacs with the [canvas patch](https://github.com/minad/emacs-canvas-patch) (see `./canvasmacs`), embr renders frames directly to a pixel buffer via a native C module, skipping the per-frame disk round-trip.
 
 ![embr screenshot](assets/screenshot.png)
 
@@ -33,7 +31,7 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
         embr-scroll-method 'instant
         embr-scroll-step 100
         embr-frame-source 'screencast
-        embr-render-backend 'auto
+        embr-render-backend 'default
         embr-display-method 'headless))
 ```
 
@@ -56,7 +54,7 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
         embr-scroll-method 'instant
         embr-scroll-step 100
         embr-frame-source 'screencast
-        embr-render-backend 'auto
+        embr-render-backend 'default
         embr-display-method 'headless))
 ```
 
@@ -92,7 +90,7 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | What | Path (0.40+) | Path (0.30) |
 |------|--------------|-------------|
 | Python venv | `~/.local/share/embr/.venv/` | same |
-| Browser binary | `~/.cache/cloakbrowser/` | `~/.cache/camoufox/` |
+| Browser binary | `~/.cloakbrowser/` | `~/.cache/camoufox/` |
 | Cookies & sessions | `~/.local/share/embr/chromium-profile/` | `~/.local/share/embr/firefox-profile/` |
 
 `M-x embr-uninstall` removes the venv and profile. Browser cache deletion is offered as an optional prompt.
@@ -117,8 +115,8 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-perf-log` | boolean | `nil` | Write JSONL perf events to `/tmp/embr-perf.jsonl`. Analyze with `tools/embr-perf-report.py`. |
 | `embr-hover-move-threshold-px` | integer | `0` | Minimum pixel distance before sending a hover update. Filters sub-pixel jitter. |
 | `embr-external-command` | string | yt-dlp + mpv | Shell command for `&` key (`%s` = URL). Default pipes through yt-dlp into mpv. |
-| `embr-frame-source` | symbol | `'screencast` | `'screencast` uses CDP screencast (recommended). `'auto` tries screencast first, falls back to polling. `'screenshot` uses polling only. |
-| `embr-render-backend` | symbol | `'auto` | `'auto` uses canvas if available, falls back to legacy. `'legacy` uses JPEG file + create-image. `'canvas` requires canvas-patched Emacs + native module. |
+| `embr-frame-source` | symbol | `'screencast` | `'screencast` uses CDP screencast (recommended). `'screenshot` uses polling only. |
+| `embr-render-backend` | symbol | `'default` | `'default` uses JPEG file + create-image. `'canvas` requires canvas-patched Emacs + native module. |
 | `embr-display-method` | symbol | `'headless` | `'headless` (no window, no audio), `'headed` (visible window, audio), `'headed-offscreen` (hidden window via Xvfb, audio). |
 
 
@@ -210,7 +208,7 @@ For full cosmetic filtering, element hiding, and script-level ad blocking (e.g. 
    (setq embr-display-method 'headed)
    ```
 
-3. **Enable the extension.** Navigate to `chrome://extensions`, turn on **Developer mode** (top-right toggle), and enable uBlock Origin if it is not already active.
+3. **Enable the extension.** Navigate to `chrome://extensions`, turn on **Developer mode** (top-right toggle), and enable uBlock Origin if it is not already active. (PR accepted if you find a way to automate this in our `embr.py`.)
 
 4. **Switch to headed-offscreen** and restart embr. The extension persists in your browser profile across restarts.
 
@@ -220,7 +218,7 @@ For full cosmetic filtering, element hiding, and script-level ad blocking (e.g. 
 
 ## Emacs Canvas
 
-If you built a recent Emacs with the experimental [canvas patches](https://github.com/minad/emacs-canvas-patch), embr will detect it at startup and use a native canvas render path (JPEG decode straight to pixel buffer, no disk round-trip). Runs great without it too. Arch users can check `./canvasmacs` for a PKGBUILD that builds `emacs-wayland` with the canvas patches applied.
+If you built a recent Emacs with the experimental [canvas patches](https://github.com/minad/emacs-canvas-patch), set `embr-render-backend` to `'canvas` to use the native canvas render path (JPEG decode straight to pixel buffer, no disk round-trip). Runs great without it too. Arch users can check `./canvasmacs` for a PKGBUILD that builds `emacs-wayland` with the canvas patches applied.
 
 ## FAQ
 

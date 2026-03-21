@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/embr"
-BROWSERS_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/cloakbrowser"
+BROWSERS_DIR="$HOME/.cloakbrowser"
 BLOCKLIST="$SCRIPT_DIR/blocklist.txt"
 
 echo "This will delete:"

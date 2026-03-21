@@ -177,10 +177,8 @@ When non-nil, the daemon writes JSONL performance events to
 (defcustom embr-frame-source 'screencast
   "How frames are captured from the browser.
 `screencast' uses CDP screencast (recommended).
-`auto' tries CDP screencast first, falls back to screenshot polling.
 `screenshot' uses the original screenshot polling loop."
   :type '(choice (const :tag "Screencast (recommended)" screencast)
-                 (const :tag "Auto (screencast with fallback)" auto)
                  (const :tag "Screenshot polling" screenshot)))
 
 (defcustom embr-hover-move-threshold-px 0
@@ -193,13 +191,11 @@ at the cost of hover precision."
   "Deprecated. Screenshot-only. Minimum hover rate under load pressure."
   :type 'integer)
 
-(defcustom embr-render-backend 'auto
+(defcustom embr-render-backend 'default
   "Render backend for frame display.
-`auto' detects canvas support and uses it if available, falls back to legacy.
-`legacy' uses the JPEG file + create-image path (works on any Emacs).
+`default' uses the JPEG file + create-image path (works on any Emacs).
 `canvas' uses the native canvas pixel path (requires canvas-patched Emacs)."
-  :type '(choice (const :tag "Auto (canvas with fallback)" auto)
-                 (const :tag "Legacy JPEG file" legacy)
+  :type '(choice (const :tag "Default (JPEG file)" default)
                  (const :tag "Canvas (requires patch)" canvas)))
 
 (defcustom embr-display-method 'headless
@@ -286,7 +282,7 @@ This does NOT remove the Emacs package itself — use your package manager for t
       (insert (format "Running uninstall.sh in %s ...\n\n" embr--directory))
       ;; Run with yes piped to stdin to auto-confirm (user already confirmed via M-x).
       (when (y-or-n-p "Remove Python venv and browser profile? ")
-        (let* ((also-browsers (y-or-n-p "Also delete CloakBrowser's browser cache (~/.cache/cloakbrowser)? "))
+        (let* ((also-browsers (y-or-n-p "Also delete CloakBrowser's browser cache (~/.cloakbrowser)? "))
                (input (concat "y\n" (if also-browsers "y\n" "n\n")))
                (proc (start-process "embr-uninstall" buf "bash" "-c"
                                      (format "echo %s | bash %s"
@@ -305,9 +301,7 @@ This does NOT remove the Emacs package itself — use your package manager for t
   "Show diagnostic info about the embr installation."
   (interactive)
   (let ((venv-dir (expand-file-name ".venv" embr--data-dir))
-        (browsers-dir (expand-file-name "cloakbrowser"
-                                         (or (getenv "XDG_CACHE_HOME")
-                                             (expand-file-name ".cache" "~"))))
+        (browsers-dir (expand-file-name ".cloakbrowser" "~"))
         (profile-dir (expand-file-name "chromium-profile" embr--data-dir)))
     (message "embr installation:
   Source:     %s
@@ -345,7 +339,7 @@ This does NOT remove the Emacs package itself — use your package manager for t
 (defvar embr--render-timer nil "Timer that renders pending frames at a capped rate.")
 (defvar embr--pressure nil "Non-nil when daemon signals load pressure.")
 (defvar embr--hover-last-send-time nil "Float-time of last hover send.")
-(defvar embr--active-backend nil "Active render backend name: legacy or canvas.")
+(defvar embr--active-backend nil "Active render backend name: default or canvas.")
 (defvar embr--canvas-image nil "Canvas image spec for the canvas backend.")
 (defvar embr--canvas-socket nil "Network process for canvas frame socket.")
 (defvar embr--canvas-recv-buf "" "Accumulator for partial canvas socket packets.")
@@ -353,7 +347,7 @@ This does NOT remove the Emacs package itself — use your package manager for t
 (defvar embr--canvas-stale-count 0 "Number of stale/out-of-order frames dropped.")
 (defvar embr--canvas-error-count 0 "Consecutive canvas blit errors.")
 (defvar embr--canvas-frame-count 0 "Total frames blitted via canvas backend.")
-(defvar embr--legacy-frame-count 0 "Total frames rendered via legacy backend.")
+(defvar embr--default-frame-count 0 "Total frames rendered via default backend.")
 
 ;; ── Process management ─────────────────────────────────────────────
 
@@ -462,7 +456,7 @@ Respects `embr-display-method' for display modes."
 (declare-function embr-canvas-version "embr-canvas")
 
 (defconst embr--canvas-max-errors 5
-  "Consecutive canvas blit errors before fallback to legacy.")
+  "Consecutive canvas blit errors before fallback to default.")
 
 (defun embr--canvas-source-dir ()
   "Return the directory containing native module source.
@@ -528,9 +522,7 @@ Layer 1: image type.  Layer 2: native module.  Layer 3: smoke render."
      (if (embr--canvas-available-p)
          "canvas"
        (error "embr: canvas backend requested but not available")))
-    ('legacy "legacy")
-    (_ ;; auto
-     (if (embr--canvas-available-p) "canvas" "legacy"))))
+    (_ "default")))
 
 ;; ── Backend interface ─────────────────────────────────────────────
 
@@ -544,21 +536,21 @@ SOCKET-PATH is the daemon frame socket (used by canvas backend)."
   (setq embr--active-backend name
         embr--canvas-error-count 0
         embr--canvas-frame-count 0
-        embr--legacy-frame-count 0)
+        embr--default-frame-count 0)
   (if (string= name "canvas")
       (condition-case err
           (embr--backend-init-canvas socket-path)
         (error
-         (message "embr: canvas init failed (%s), falling back to legacy"
+         (message "embr: canvas init failed (%s), falling back to default"
                   (error-message-string err))
-         (setq embr--active-backend "legacy")
+         (setq embr--active-backend "default")
          (embr--render-start)))
     (embr--render-start)))
 
 (defun embr--backend-on-frame (resp)
   "Dispatch frame notification RESP to the active backend."
-  (if (string= embr--active-backend "legacy")
-      (embr--legacy-display-frame resp)
+  (if (string= embr--active-backend "default")
+      (embr--default-display-frame resp)
     ;; Canvas: pixel data arrives via socket, nothing to do here.
     nil))
 
@@ -570,7 +562,7 @@ SOCKET-PATH is the daemon frame socket (used by canvas backend)."
 
 ;; ── Legacy backend ────────────────────────────────────────────────
 
-(defun embr--legacy-display-frame (_resp)
+(defun embr--default-display-frame (_resp)
   "Read JPEG from disk and display in buffer."
   (when (and embr--frame-path
              (file-exists-p embr--frame-path)
@@ -586,7 +578,7 @@ SOCKET-PATH is the daemon frame socket (used by canvas backend)."
           (remove-text-properties (point-min) (point-max) '(keymap nil))
           (put-text-property (point-min) (point-max) 'pointer 'arrow)
           (goto-char (point-min)))))
-    (cl-incf embr--legacy-frame-count)))
+    (cl-incf embr--default-frame-count)))
 
 ;; ── Canvas backend ────────────────────────────────────────────────
 
@@ -597,11 +589,11 @@ SOCKET-PATH is the daemon frame socket (used by canvas backend)."
           (ash (aref str (+ offset 2)) 16)
           (ash (aref str (+ offset 3)) 24)))
 
-(defun embr--canvas-fallback-to-legacy ()
-  "Switch from canvas to legacy backend mid-session."
-  (message "embr: canvas errors exceeded threshold, falling back to legacy")
+(defun embr--canvas-fallback-to-default ()
+  "Switch from canvas to default backend mid-session."
+  (message "embr: canvas errors exceeded threshold, falling back to default")
   (embr--backend-shutdown-canvas)
-  (setq embr--active-backend "legacy")
+  (setq embr--active-backend "default")
   (embr--render-start))
 
 (defun embr--canvas-socket-filter (_proc data)
@@ -640,7 +632,7 @@ and blit the latest to the canvas."
                    (cl-incf embr--canvas-error-count)
                    (when (>= embr--canvas-error-count
                              embr--canvas-max-errors)
-                     (embr--canvas-fallback-to-legacy)
+                     (embr--canvas-fallback-to-default)
                      (setq done t))))))))))))
 
 (defun embr--canvas-socket-sentinel (_proc event)
@@ -648,7 +640,7 @@ and blit the latest to the canvas."
   (when (string-match-p "\\(closed\\|connection broken\\)" event)
     (message "embr: canvas socket closed")
     (when (string= embr--active-backend "canvas")
-      (embr--canvas-fallback-to-legacy))))
+      (embr--canvas-fallback-to-default))))
 
 (defun embr--backend-init-canvas (socket-path)
   "Initialize the canvas render backend.
@@ -693,18 +685,18 @@ Connect to SOCKET-PATH and create the canvas image in the buffer."
 (defun embr-backend-info ()
   "Display render backend diagnostics."
   (interactive)
-  (message "embr backend: %s | canvas: %d frames, %d errors, %d stale | legacy: %d frames"
+  (message "embr backend: %s | canvas: %d frames, %d errors, %d stale | default: %d frames"
            (embr--backend-name)
            embr--canvas-frame-count
            embr--canvas-error-count
            embr--canvas-stale-count
-           embr--legacy-frame-count))
+           embr--default-frame-count))
 
-(defun embr-force-legacy-backend ()
-  "Force switch to legacy backend mid-session."
+(defun embr-force-default-backend ()
+  "Force switch to default backend mid-session."
   (interactive)
   (when (string= embr--active-backend "canvas")
-    (embr--canvas-fallback-to-legacy)))
+    (embr--canvas-fallback-to-default)))
 
 ;; ── Display ────────────────────────────────────────────────────────
 
@@ -1415,7 +1407,7 @@ If the daemon is already running, just navigate to the new URL."
         (setq embr--frame-path (alist-get 'frame_path resp))
         (embr--hover-start)
         (embr--backend-init
-         (or (alist-get 'render_backend resp) "legacy")
+         (or (alist-get 'render_backend resp) "default")
          (alist-get 'frame_socket_path resp))
         (message "embr: %s transport, %s backend"
                  (or (alist-get 'frame_source resp) "unknown")
