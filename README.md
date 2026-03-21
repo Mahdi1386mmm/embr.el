@@ -185,10 +185,6 @@ Browser commands use the `C-c` prefix. Eww-inspired commands, just behind a pref
 
 Standard Emacs bookmarks work: `C-x r m` to save, `C-x r b` to jump.
 
-## Updating
-
-Run `M-x embr-setup-or-update-all` periodically. It updates the browser binary (important for security), the Python venv and Playwright, the domain blocklist, and uBlock Origin. You can also update individual components with `M-x embr-update-blocklist` or `M-x embr-update-ublock`.
-
 ## Ad Blocking
 
 Two layers of ad blocking are available.
