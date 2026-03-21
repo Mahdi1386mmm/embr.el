@@ -84,7 +84,9 @@ realistic browser fingerprint."
   :type 'integer)
 
 (defcustom embr-fps 60
-  "Target frames per second for the screenshot stream."
+  "Target frames per second for the screenshot polling loop.
+Only relevant when `embr-frame-source' is `screenshot'.  In screencast
+mode the browser compositor controls frame rate."
   :type 'integer)
 
 (defcustom embr-jpeg-quality 80
@@ -93,10 +95,8 @@ Lower values reduce frame size and CDP pipe contention at the cost
 of image quality.  At 80 frames are ~60KB; at 50 they are ~30KB."
   :type 'integer)
 
-(defcustom embr-hover-rate 20
-  "Mouse hover tracking rate in Hz.
-Lower values reduce CDP pipe contention (improving click reliability
-during video playback) at the cost of hover responsiveness."
+(defcustom embr-hover-rate 60
+  "Mouse hover tracking rate in Hz."
   :type 'integer)
 
 (defcustom embr-external-command "yt-dlp -o - %s | mpv -"
@@ -181,14 +181,14 @@ exceeds the frame budget, and recovers when headroom returns."
   "Minimum JPEG quality the adaptive controller will step down to."
   :type 'integer)
 
-(defcustom embr-frame-source 'auto
+(defcustom embr-frame-source 'screencast
   "How frames are captured from the browser.
+`screencast' uses CDP screencast push (recommended).
 `auto' tries CDP screencast first, falls back to screenshot polling.
-`screenshot' uses the original screenshot polling loop.
-`screencast' requires CDP screencast, errors if unavailable."
-  :type '(choice (const :tag "Auto (screencast with fallback)" auto)
-                 (const :tag "Screenshot polling" screenshot)
-                 (const :tag "Screencast (no fallback)" screencast)))
+`screenshot' uses the original screenshot polling loop."
+  :type '(choice (const :tag "Screencast (recommended)" screencast)
+                 (const :tag "Auto (screencast with fallback)" auto)
+                 (const :tag "Screenshot polling" screenshot)))
 
 (defcustom embr-hover-move-threshold-px 0
   "Minimum pixel distance before sending a hover update.

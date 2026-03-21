@@ -23,9 +23,7 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
            :repo "emacs-os/embr.el"
            :files ("*.el" "*.py" "*.sh"))
   :config
-  (setq embr-fps 60
-        embr-jpeg-quality 80
-        embr-hover-rate 20
+  (setq embr-hover-rate 60
         embr-default-width 1280
         embr-default-height 720
         embr-screen-width 1920
@@ -46,9 +44,7 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
              :repo "emacs-os/embr.el"
              :files ("*.el" "*.py" "*.sh"))
   :config
-  (setq embr-fps 60
-        embr-jpeg-quality 80
-        embr-hover-rate 20
+  (setq embr-hover-rate 60
         embr-default-width 1280
         embr-default-height 720
         embr-screen-width 1920
@@ -119,7 +115,7 @@ rm -rf ~/.local/share/embr ~/.cache/camoufox
 | `embr-script` | file | `embr.py` in package dir | Path to the embr.py daemon script. |
 | `embr-fps` | integer | `60` | Target frames per second |
 | `embr-jpeg-quality` | integer | `80` | JPEG quality (1-100). Lower = smaller frames, less CDP contention, worse image. 50 halves frame size. |
-| `embr-hover-rate` | integer | `20` | Mouse hover tracking rate in Hz. Lower = better click reliability during video, less responsive hover. |
+| `embr-hover-rate` | integer | `60` | Mouse hover tracking rate in Hz. |
 | `embr-default-width` | integer | `1280` | Viewport width in pixels |
 | `embr-default-height` | integer | `720` | Viewport height in pixels |
 | `embr-screen-width` | integer | `1920` | Screen width reported to websites (should be >= viewport) |
@@ -138,7 +134,7 @@ rm -rf ~/.local/share/embr ~/.cache/camoufox
 | `embr-hover-move-threshold-px` | integer | `0` | Minimum pixel distance before sending a hover update. Filters sub-pixel jitter. |
 | `embr-hover-rate-min` | integer | `14` | Minimum hover rate (Hz) under load pressure. Hover self-throttles from `embr-hover-rate` to this. |
 | `embr-external-command` | string | yt-dlp + mpv | Shell command for `&` key (`%s` = URL). Default pipes through yt-dlp into mpv. |
-| `embr-frame-source` | symbol | `'auto` | `'auto` tries CDP screencast first, falls back to screenshot polling. `'screenshot` uses polling only. `'screencast` requires CDP screencast, errors if unavailable. |
+| `embr-frame-source` | symbol | `'screencast` | `'screencast` uses CDP screencast push (recommended). `'auto` tries screencast first, falls back to screenshot polling. `'screenshot` uses polling only. |
 | `embr-display-method` | symbol | `'headless` | `'headless` (no window, no audio), `'headed` (visible window, audio), `'headed-offscreen` (hidden window via Xvfb, audio). |
 
 ### Reverting to screenshot polling
