@@ -5,6 +5,7 @@ import asyncio
 import base64
 import json
 import os
+import struct
 import sys
 import tempfile
 import time
@@ -120,6 +121,13 @@ async def main():
     _ack_ok_count = 0
     _ack_ok_logged = 0
 
+    # Canvas stream state.
+    render_backend = "legacy"
+    frame_socket_path = None
+    frame_socket_server = None
+    frame_socket_writer = None
+    frame_seq = 0
+
     data_dir = Path.home() / ".local" / "share" / "embr"
     user_data_dir = data_dir / "chromium-profile"
     user_data_dir.mkdir(parents=True, exist_ok=True)
@@ -164,10 +172,16 @@ async def main():
         # Update capture EMA for adaptive controller.
         alpha = 0.2
         capture_ema = alpha * capture_ms + (1 - alpha) * capture_ema
-        tmp = FRAME_PATH + ".tmp"
-        with open(tmp, "wb") as f:
-            f.write(jpg_bytes)
-        os.rename(tmp, FRAME_PATH)
+        if render_backend == "canvas":
+            send_frame_to_socket(
+                jpg_bytes,
+                page.viewport_size["width"],
+                page.viewport_size["height"])
+        else:
+            tmp = FRAME_PATH + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(jpg_bytes)
+            os.rename(tmp, FRAME_PATH)
         frame_count += 1
         if frame_count % 15 == 0:
             try:
@@ -271,6 +285,60 @@ async def main():
             else:
                 await asyncio.sleep(0.05)
 
+    # ── Canvas frame socket ─────────────────────────────────────────
+
+    async def start_frame_socket():
+        """Create a UNIX socket server for canvas frame delivery."""
+        nonlocal frame_socket_path, frame_socket_server, frame_socket_writer
+        frame_socket_path = os.path.join(
+            tempfile.gettempdir(), f"embr-canvas-{os.getpid()}.sock")
+        try:
+            os.unlink(frame_socket_path)
+        except OSError:
+            pass
+
+        async def on_connect(reader, writer):
+            nonlocal frame_socket_writer
+            frame_socket_writer = writer
+            print("embr: canvas socket connected", file=sys.stderr)
+
+        frame_socket_server = await asyncio.start_unix_server(
+            on_connect, path=frame_socket_path)
+        print(f"embr: canvas socket at {frame_socket_path}", file=sys.stderr)
+
+    def send_frame_to_socket(jpg_bytes, width, height):
+        """Write a length-prefixed JPEG frame packet to the canvas socket."""
+        nonlocal frame_seq
+        if frame_socket_writer is None:
+            return
+        frame_seq += 1
+        header = struct.pack('<IIII', frame_seq, width, height, len(jpg_bytes))
+        try:
+            frame_socket_writer.write(header + jpg_bytes)
+            # Schedule drain for backpressure (sync context, can't await).
+            asyncio.ensure_future(frame_socket_writer.drain())
+        except Exception as e:
+            print(f"embr: canvas socket write error: {e}", file=sys.stderr)
+
+    async def stop_frame_socket():
+        """Close the canvas frame socket."""
+        nonlocal frame_socket_server, frame_socket_writer, frame_socket_path
+        if frame_socket_writer:
+            try:
+                frame_socket_writer.close()
+            except Exception:
+                pass
+            frame_socket_writer = None
+        if frame_socket_server:
+            frame_socket_server.close()
+            frame_socket_server = None
+        if frame_socket_path:
+            try:
+                os.unlink(frame_socket_path)
+            except OSError:
+                pass
+            frame_socket_path = None
+
     # ── Screencast transport ───────────────────────────────────────
 
     async def start_screencast():
@@ -359,10 +427,16 @@ async def main():
             return
         jpg_bytes = base64.b64decode(_pending_frame_data)
         _pending_frame_data = None
-        tmp = FRAME_PATH + ".tmp"
-        with open(tmp, "wb") as f:
-            f.write(jpg_bytes)
-        os.rename(tmp, FRAME_PATH)
+        if render_backend == "canvas":
+            send_frame_to_socket(
+                jpg_bytes,
+                page.viewport_size["width"],
+                page.viewport_size["height"])
+        else:
+            tmp = FRAME_PATH + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(jpg_bytes)
+            os.rename(tmp, FRAME_PATH)
         fid = perf.next_frame_id()
         capture_done_mono_ms = round(now * 1000, 2)
         emit_frame({"frame": True, "title": cached_title, "url": page.url,
@@ -569,14 +643,17 @@ async def main():
 
     async def handle(cmd, params):
         nonlocal context, page, running, loop_task, target_fps, jpeg_quality, cached_title
-        nonlocal input_priority_window_s, frame_source
+        nonlocal input_priority_window_s, frame_source, render_backend
         nonlocal adaptive_enabled, fps_min, fps_max, quality_min, quality_max
 
         if cmd == "init":
-            # Validate frame_source before any heavy work.
+            # Validate frame_source and render_backend before any heavy work.
             frame_source = params.get("frame_source", "auto")
             if frame_source not in ("auto", "screenshot", "screencast"):
                 return {"error": f"invalid frame_source: {frame_source!r}"}
+            render_backend = params.get("render_backend", "legacy")
+            if render_backend not in ("legacy", "canvas"):
+                return {"error": f"invalid render_backend: {render_backend!r}"}
             if params.get("perf_log"):
                 perf.enable()
             width = params.get("width", 1280)
@@ -748,9 +825,19 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
                           file=sys.stderr)
                     active_source = "screenshot"
                     loop_task = asyncio.create_task(screenshot_loop())
+            # Start canvas frame socket if requested.
+            if render_backend == "canvas":
+                await start_frame_socket()
+                print(f"embr: render_backend=canvas", file=sys.stderr)
+            else:
+                print(f"embr: render_backend=legacy", file=sys.stderr)
             perf.source = active_source
-            return {"ok": True, "frame_path": FRAME_PATH,
-                    "frame_source": active_source}
+            resp = {"ok": True, "frame_path": FRAME_PATH,
+                    "frame_source": active_source,
+                    "render_backend": render_backend}
+            if frame_socket_path:
+                resp["frame_socket_path"] = frame_socket_path
+            return resp
 
         if context is None or page is None:
             return {"error": "not initialized — send init first"}
@@ -1002,6 +1089,7 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
                     await loop_task
                 except asyncio.CancelledError:
                     pass
+            await stop_frame_socket()
             if context:
                 await context.close()
             await pw.stop()

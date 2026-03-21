@@ -21,8 +21,12 @@ checkpy:
 shellcheck:
 	$(SHELLCHECK) setup.sh uninstall.sh tools/run-benchmarks.sh && echo "OK: shell scripts pass shellcheck"
 
+# Native canvas module — requires canvas-patched Emacs + libjpeg-turbo.
+module:
+	$(MAKE) -C native
+
 # M0 feasibility gate — requires CloakBrowser installed (not in default test).
 screencast-gate:
 	$(PYTHON) tools/screencast-gate.py
 
-.PHONY: test check checkparens bytecompile checkpy shellcheck screencast-gate
+.PHONY: test check checkparens bytecompile checkpy shellcheck module screencast-gate

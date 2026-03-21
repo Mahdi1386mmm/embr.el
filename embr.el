@@ -33,6 +33,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'image)
 
 ;; ── Customization ──────────────────────────────────────────────────
@@ -202,6 +203,15 @@ The hover timer runs at `embr-hover-rate' normally, but self-throttles
 to this rate when the daemon is under input pressure."
   :type 'integer)
 
+(defcustom embr-render-backend 'auto
+  "Render backend for frame display.
+`auto' detects canvas support and uses it if available, falls back to legacy.
+`legacy' uses the JPEG file + create-image path (works on any Emacs).
+`canvas' uses the native canvas pixel path (requires canvas-patched Emacs)."
+  :type '(choice (const :tag "Auto (canvas with fallback)" auto)
+                 (const :tag "Legacy JPEG file" legacy)
+                 (const :tag "Canvas (requires patch)" canvas)))
+
 (defcustom embr-display-method 'headless
   "How the browser display is managed.
 `headless' runs Chromium in headless mode (no window, no audio).
@@ -345,6 +355,15 @@ This does NOT remove the Emacs package itself — use your package manager for t
 (defvar embr--render-timer nil "Timer that renders pending frames at a capped rate.")
 (defvar embr--pressure nil "Non-nil when daemon signals load pressure.")
 (defvar embr--hover-last-send-time nil "Float-time of last hover send.")
+(defvar embr--active-backend nil "Active render backend name: legacy or canvas.")
+(defvar embr--canvas-image nil "Canvas image spec for the canvas backend.")
+(defvar embr--canvas-socket nil "Network process for canvas frame socket.")
+(defvar embr--canvas-recv-buf "" "Accumulator for partial canvas socket packets.")
+(defvar embr--canvas-last-seq 0 "Sequence number of the last rendered canvas frame.")
+(defvar embr--canvas-stale-count 0 "Number of stale/out-of-order frames dropped.")
+(defvar embr--canvas-error-count 0 "Consecutive canvas blit errors.")
+(defvar embr--canvas-frame-count 0 "Total frames blitted via canvas backend.")
+(defvar embr--legacy-frame-count 0 "Total frames rendered via legacy backend.")
 
 ;; ── Process management ─────────────────────────────────────────────
 
@@ -424,7 +443,7 @@ Respects `embr-display-method' for display modes."
   (when (string-match-p "\\(finished\\|exited\\|killed\\)" event)
     (message "embr: daemon exited: %s" (string-trim event))
     (embr--hover-stop)
-    (embr--render-stop)
+    (embr--backend-shutdown)
     (setq embr--process nil)))
 
 (defun embr--send (msg &optional callback)
@@ -446,42 +465,277 @@ Respects `embr-display-method' for display modes."
       (accept-process-output embr--process 30))
     result))
 
+;; ── Render backend ─────────────────────────────────────────────────
+
+(declare-function embr-canvas-supported-p "embr-canvas")
+(declare-function embr-canvas-blit-jpeg "embr-canvas")
+(declare-function embr-canvas-version "embr-canvas")
+
+(defconst embr--canvas-max-errors 5
+  "Consecutive canvas blit errors before fallback to legacy.")
+
+(defun embr--canvas-source-dir ()
+  "Return the directory containing native module source.
+Resolves symlinks so this works when Elpaca symlinks embr.el
+from the build dir to the source repo."
+  (file-name-directory (file-truename
+                        (expand-file-name "embr.el" embr--directory))))
+
+(defun embr--canvas-maybe-compile ()
+  "Compile the canvas native module if source exists but .so does not."
+  (let* ((source-dir (embr--canvas-source-dir))
+         (so (expand-file-name "native/embr-canvas.so" source-dir))
+         (src (expand-file-name "native/embr-canvas.c" source-dir)))
+    (when (and (file-exists-p src) (not (file-exists-p so)))
+      (message "embr: compiling canvas module...")
+      (let ((ret (call-process
+                  "make" nil nil nil "-C"
+                  (expand-file-name "native" source-dir))))
+        (if (= ret 0)
+            (message "embr: canvas module compiled")
+          (message "embr: canvas module compilation failed (exit %d)" ret))))))
+
+(defun embr--canvas-available-p ()
+  "Return non-nil if canvas rendering is available.
+Layer 1: image type.  Layer 2: native module.  Layer 3: smoke render."
+  (and
+   ;; Layer 1: Elisp image type.
+   (image-type-available-p 'canvas)
+   ;; Layer 2: native module loads and reports support.
+   (condition-case err
+       (progn
+         (embr--canvas-maybe-compile)
+         (module-load
+          (expand-file-name "native/embr-canvas.so"
+                            (embr--canvas-source-dir)))
+         (and (fboundp 'embr-canvas-supported-p)
+              (embr-canvas-supported-p)))
+     (error
+      (message "embr: canvas module unavailable: %s"
+               (error-message-string err))
+      nil))
+   ;; Layer 3: smoke render (create tiny canvas, call module, verify
+   ;; no crash).  Blit returns nil for invalid JPEG but exercises
+   ;; canvas_pixel internally, proving the API works end-to-end.
+   (condition-case err
+       (progn
+         (embr-canvas-blit-jpeg
+          '(image :type canvas
+                  :canvas-id embr--smoke-test
+                  :canvas-width 4
+                  :canvas-height 4)
+          "" 4 4 0)
+         t)
+     (error
+      (message "embr: canvas smoke test failed: %s"
+               (error-message-string err))
+      nil))))
+
+(defun embr--select-backend ()
+  "Select the render backend based on `embr-render-backend'."
+  (pcase embr-render-backend
+    ('canvas
+     (if (embr--canvas-available-p)
+         "canvas"
+       (error "embr: canvas backend requested but not available")))
+    ('legacy "legacy")
+    (_ ;; auto
+     (if (embr--canvas-available-p) "canvas" "legacy"))))
+
+;; ── Backend interface ─────────────────────────────────────────────
+
+(defun embr--backend-name ()
+  "Return the name of the active render backend."
+  (or embr--active-backend "none"))
+
+(defun embr--backend-init (name socket-path)
+  "Initialize render backend NAME.
+SOCKET-PATH is the daemon frame socket (used by canvas backend)."
+  (setq embr--active-backend name
+        embr--canvas-error-count 0
+        embr--canvas-frame-count 0
+        embr--legacy-frame-count 0)
+  (if (string= name "canvas")
+      (condition-case err
+          (embr--backend-init-canvas socket-path)
+        (error
+         (message "embr: canvas init failed (%s), falling back to legacy"
+                  (error-message-string err))
+         (setq embr--active-backend "legacy")
+         (embr--render-start)))
+    (embr--render-start)))
+
+(defun embr--backend-on-frame (resp)
+  "Dispatch frame notification RESP to the active backend."
+  (if (string= embr--active-backend "legacy")
+      (embr--legacy-display-frame resp)
+    ;; Canvas: pixel data arrives via socket, nothing to do here.
+    nil))
+
+(defun embr--backend-shutdown ()
+  "Shut down the active render backend."
+  (embr--render-stop)
+  (embr--backend-shutdown-canvas)
+  (setq embr--active-backend nil))
+
+;; ── Legacy backend ────────────────────────────────────────────────
+
+(defun embr--legacy-display-frame (_resp)
+  "Read JPEG from disk and display in buffer."
+  (when (and embr--frame-path
+             (file-exists-p embr--frame-path)
+             (buffer-live-p embr--buffer))
+    (let ((data (with-temp-buffer
+                  (set-buffer-multibyte nil)
+                  (insert-file-contents-literally embr--frame-path)
+                  (buffer-string))))
+      (with-current-buffer embr--buffer
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert-image (create-image data 'jpeg t))
+          (remove-text-properties (point-min) (point-max) '(keymap nil))
+          (put-text-property (point-min) (point-max) 'pointer 'arrow)
+          (goto-char (point-min)))))
+    (cl-incf embr--legacy-frame-count)))
+
+;; ── Canvas backend ────────────────────────────────────────────────
+
+(defun embr--read-u32 (str offset)
+  "Read a little-endian uint32 from unibyte STR at OFFSET."
+  (logior (aref str offset)
+          (ash (aref str (+ offset 1)) 8)
+          (ash (aref str (+ offset 2)) 16)
+          (ash (aref str (+ offset 3)) 24)))
+
+(defun embr--canvas-fallback-to-legacy ()
+  "Switch from canvas to legacy backend mid-session."
+  (message "embr: canvas errors exceeded threshold, falling back to legacy")
+  (embr--backend-shutdown-canvas)
+  (setq embr--active-backend "legacy")
+  (embr--render-start))
+
+(defun embr--canvas-socket-filter (_proc data)
+  "Handle binary frame data from the canvas socket.
+Parse length-prefixed packets, drop stale/out-of-order frames,
+and blit the latest to the canvas."
+  (setq embr--canvas-recv-buf (concat embr--canvas-recv-buf data))
+  (let ((done nil))
+    (while (and (not done)
+                (>= (length embr--canvas-recv-buf) 16))
+      (let* ((hdr embr--canvas-recv-buf)
+             (seq (embr--read-u32 hdr 0))
+             (jpeg-len (embr--read-u32 hdr 12))
+             (total (+ 16 jpeg-len)))
+        (if (< (length embr--canvas-recv-buf) total)
+            (setq done t)
+          (let ((jpeg-data (substring embr--canvas-recv-buf 16 total))
+                (width (embr--read-u32 hdr 4))
+                (height (embr--read-u32 hdr 8)))
+            (setq embr--canvas-recv-buf
+                  (substring embr--canvas-recv-buf total))
+            ;; Drop stale or out-of-order packets.  Handle uint32
+            ;; wraparound: if delta is huge (> 2^31), seq wrapped.
+            (if (and (<= seq embr--canvas-last-seq)
+                     (< (- embr--canvas-last-seq seq) #x80000000))
+                (progn (cl-incf embr--canvas-stale-count) nil)
+              (setq embr--canvas-last-seq seq)
+              (when embr--canvas-image
+                (condition-case nil
+                    (progn
+                      (embr-canvas-blit-jpeg
+                       embr--canvas-image jpeg-data width height seq)
+                      (cl-incf embr--canvas-frame-count)
+                      (setq embr--canvas-error-count 0))
+                  (error
+                   (cl-incf embr--canvas-error-count)
+                   (when (>= embr--canvas-error-count
+                             embr--canvas-max-errors)
+                     (embr--canvas-fallback-to-legacy)
+                     (setq done t))))))))))))
+
+(defun embr--canvas-socket-sentinel (_proc event)
+  "Handle canvas socket disconnect."
+  (when (string-match-p "\\(closed\\|connection broken\\)" event)
+    (message "embr: canvas socket closed")
+    (when (string= embr--active-backend "canvas")
+      (embr--canvas-fallback-to-legacy))))
+
+(defun embr--backend-init-canvas (socket-path)
+  "Initialize the canvas render backend.
+Connect to SOCKET-PATH and create the canvas image in the buffer."
+  (setq embr--canvas-image
+        `(image :type canvas
+                :canvas-id embr-viewport-canvas
+                :canvas-width ,embr--viewport-width
+                :canvas-height ,embr--viewport-height))
+  (setq embr--canvas-recv-buf ""
+        embr--canvas-error-count 0
+        embr--canvas-last-seq 0
+        embr--canvas-stale-count 0)
+  (with-current-buffer embr--buffer
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (insert (propertize " " 'display embr--canvas-image))
+      (put-text-property (point-min) (point-max) 'pointer 'arrow)
+      (goto-char (point-min))))
+  ;; Connect to the daemon's frame socket.
+  (setq embr--canvas-socket
+        (make-network-process
+         :name "embr-canvas"
+         :family 'local
+         :remote socket-path
+         :coding '(binary . binary)
+         :filter #'embr--canvas-socket-filter
+         :sentinel #'embr--canvas-socket-sentinel
+         :noquery t)))
+
+(defun embr--backend-shutdown-canvas ()
+  "Shut down the canvas backend."
+  (when (and embr--canvas-socket (process-live-p embr--canvas-socket))
+    (delete-process embr--canvas-socket))
+  (setq embr--canvas-socket nil
+        embr--canvas-image nil
+        embr--canvas-recv-buf ""))
+
+;; ── Backend debug ─────────────────────────────────────────────────
+
+(defun embr-backend-info ()
+  "Display render backend diagnostics."
+  (interactive)
+  (message "embr backend: %s | canvas: %d frames, %d errors, %d stale | legacy: %d frames"
+           (embr--backend-name)
+           embr--canvas-frame-count
+           embr--canvas-error-count
+           embr--canvas-stale-count
+           embr--legacy-frame-count))
+
+(defun embr-force-legacy-backend ()
+  "Force switch to legacy backend mid-session."
+  (interactive)
+  (when (string= embr--active-backend "canvas")
+    (embr--canvas-fallback-to-legacy)))
+
 ;; ── Display ────────────────────────────────────────────────────────
 
 (defun embr--handle-frame (resp)
-  "Read the JPEG frame from disk and display it.  Update title/url from RESP."
+  "Handle a frame notification from the daemon.
+Dispatch to the active backend for display, then update metadata."
   (setq embr--pressure (eq (alist-get 'pressure resp) t))
   (let ((title (or (alist-get 'title resp) ""))
         (url (or (alist-get 'url resp) ""))
         (frame-id (alist-get 'frame_id resp))
         (capture-mono (alist-get 'capture_done_mono_ms resp)))
-    (when (and embr--frame-path
-               (file-exists-p embr--frame-path)
-               (buffer-live-p embr--buffer))
-      (let ((data (with-temp-buffer
-                    (set-buffer-multibyte nil)
-                    (insert-file-contents-literally embr--frame-path)
-                    (buffer-string))))
-        (with-current-buffer embr--buffer
-          (let ((inhibit-read-only t))
-            (erase-buffer)
-            (insert-image (create-image data 'jpeg t))
-            ;; `insert-image' adds `image-map' as a text-property keymap,
-            ;; which steals keys like "i" (prefix for image commands in
-            ;; Emacs 30+).  Remove it so our major-mode map handles all keys.
-            (remove-text-properties (point-min) (point-max) '(keymap nil))
-            (put-text-property (point-min) (point-max) 'pointer 'arrow)
-            (goto-char (point-min)))
-          ;; Only rename buffer when title/url actually changes.
-          (unless (and (string= title embr--current-title)
-                       (string= url embr--current-url))
-            (rename-buffer (format "*embr: %s*"
-                                   (if (string-empty-p title) url title))
-                           t))))
-      ;; Send render ack so the daemon can measure true staleness.
-      ;; Echoes capture_done_mono_ms (daemon monotonic clock) back so
-      ;; staleness is computed entirely within the daemon's monotonic
-      ;; clock — no wall-clock subtraction across processes.
+    (when (buffer-live-p embr--buffer)
+      ;; Backend-specific frame display.
+      (embr--backend-on-frame resp)
+      ;; Both backends: update buffer name on title/url change.
+      (with-current-buffer embr--buffer
+        (unless (and (string= title embr--current-title)
+                     (string= url embr--current-url))
+          (rename-buffer (format "*embr: %s*"
+                                 (if (string-empty-p title) url title))
+                         t)))
+      ;; Send render ack for perf logging.
       (when (and embr-perf-log frame-id capture-mono
                  embr--process (process-live-p embr--process))
         (process-send-string
@@ -556,7 +810,7 @@ Respects `embr-display-method' for display modes."
     (when (process-live-p embr--process)
       (delete-process embr--process)))
   (embr--hover-stop)
-  (embr--render-stop)
+  (embr--backend-shutdown)
   (setq embr--process nil
         embr--frame-path nil)
   (when (buffer-live-p embr--buffer)
@@ -1153,6 +1407,7 @@ If the daemon is already running, just navigate to the new URL."
                    ,@(when embr-perf-log
                        '((perf_log . t)))
                    (frame_source . ,(symbol-name embr-frame-source))
+                   (render_backend . ,(embr--select-backend))
                    (input_priority_window_ms . ,embr-input-priority-window-ms)
                    ,@(when embr-adaptive-capture
                        `((adaptive_capture . t)
@@ -1168,9 +1423,12 @@ If the daemon is already running, just navigate to the new URL."
         ;; Daemon tells us where it writes frames.
         (setq embr--frame-path (alist-get 'frame_path resp))
         (embr--hover-start)
-        (embr--render-start)
-        (message "embr: using %s transport"
-                 (or (alist-get 'frame_source resp) "unknown")))))
+        (embr--backend-init
+         (or (alist-get 'render_backend resp) "legacy")
+         (alist-get 'frame_socket_path resp))
+        (message "embr: %s transport, %s backend"
+                 (or (alist-get 'frame_source resp) "unknown")
+                 (embr--backend-name)))))
   ;; Show buffer and navigate.
   (switch-to-buffer embr--buffer)
   (embr-navigate url))

@@ -8,3 +8,4 @@ canvasmacs/src/
 canvasmacs/pkg/
 canvasmacs/emacs/
 canvasmacs/*.pkg.tar.zst
+native/*.so
