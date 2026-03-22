@@ -775,12 +775,9 @@ SOCKET-PATH is the daemon frame socket (used by canvas backend)."
                    (buffer-string))))
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (when (and embr-tab-bar embr--tab-list)
-          (insert (embr--render-tab-bar) "\n"))
-        (let ((img-start (point)))
-          (insert-image (create-image data 'jpeg t))
-          (remove-text-properties img-start (point-max) '(keymap nil))
-          (put-text-property img-start (point-max) 'pointer 'arrow))
+        (insert-image (create-image data 'jpeg t))
+        (remove-text-properties (point-min) (point-max) '(keymap nil))
+        (put-text-property (point-min) (point-max) 'pointer 'arrow)
         (goto-char (point-min))))
     (cl-incf embr--default-frame-count)))
 
@@ -860,11 +857,8 @@ Connect to SOCKET-PATH and create the canvas image in the buffer."
         embr--canvas-stale-count 0)
   (let ((inhibit-read-only t))
     (erase-buffer)
-    (when (and embr-tab-bar embr--tab-list)
-      (insert (embr--render-tab-bar) "\n"))
-    (let ((img-start (point)))
-      (insert (propertize " " 'display embr--canvas-image))
-      (put-text-property img-start (point-max) 'pointer 'arrow))
+    (insert (propertize " " 'display embr--canvas-image))
+    (put-text-property (point-min) (point-max) 'pointer 'arrow)
     (goto-char (point-min)))
   ;; Connect to the daemon's frame socket.
   (setq embr--canvas-socket
@@ -1177,22 +1171,11 @@ Return the number of tabs restored, or nil."
 
 (defun embr-mouse-handler (event)
   "Handle mouse press, track drag, and forward to browser.
-Dispatch method depends on `embr-click-method'.  Clicks on the
-tab bar are dispatched to the tab bar keymap instead."
+Dispatch method depends on `embr-click-method'."
   (interactive "e")
-  (let* ((posn (event-start event))
-         (pt (posn-point posn)))
-    (if (and pt embr-tab-bar
-             (get-text-property pt 'embr-tab-index))
-        ;; Click is on the tab bar.  Dispatch to the text property keymap.
-        (let ((map (get-text-property pt 'keymap)))
-          (when map
-            (let ((binding (lookup-key map [mouse-1])))
-              (when binding
-                (funcall binding event)))))
-      (pcase embr-click-method
-        ('immediate (embr--mouse-immediate event))
-        (_ (embr--mouse-atomic event))))))
+  (pcase embr-click-method
+    ('immediate (embr--mouse-immediate event))
+    (_ (embr--mouse-atomic event))))
 
 (defun embr--mouse-immediate (event)
   "Send mousedown immediately, then mouseup on release."
@@ -1630,12 +1613,14 @@ With prefix argument, prompt for a URL instead."
 (defvar embr--tab-label-map
   (let ((map (make-sparse-keymap)))
     (define-key map [mouse-1] #'embr--tab-bar-click)
+    (define-key map [tab-line mouse-1] #'embr--tab-bar-click)
     map)
   "Keymap for clickable tab labels in the tab bar.")
 
 (defvar embr--tab-close-map
   (let ((map (make-sparse-keymap)))
     (define-key map [mouse-1] #'embr--tab-bar-close)
+    (define-key map [tab-line mouse-1] #'embr--tab-bar-close)
     map)
   "Keymap for tab close buttons in the tab bar.")
 
@@ -1659,10 +1644,7 @@ Tabs are equal width and fill the window, like i3 tabbed layout."
     (dolist (tab embr--tab-list)
       (let* ((idx (alist-get 'index tab))
              (active (eq (alist-get 'active tab) t))
-             (title (or (and active
-                             (not (string-empty-p embr--current-title))
-                             embr--current-title)
-                        (alist-get 'title tab)
+             (title (or (alist-get 'title tab)
                         (alist-get 'url tab)
                         "untitled"))
              (label (embr--truncate-tab-title title (- label-width 1)))
@@ -1683,35 +1665,37 @@ Tabs are equal width and fill the window, like i3 tabbed layout."
                                     'embr-tab-index idx
                                     'pointer 'hand)))
         (push (concat tab-str close-str) parts)))
-    (let ((bar (mapconcat #'identity (nreverse parts)
-                          (propertize " " 'face 'embr-tab-bar))))
-      (put-text-property 0 (length bar) 'cursor-intangible t bar)
-      bar)))
+    (mapconcat #'identity (nreverse parts)
+               (propertize " " 'face 'embr-tab-bar))))
+
+(defun embr--tab-bar-event-index (event)
+  "Extract the `embr-tab-index' from a tab-line click EVENT."
+  (let* ((posn (event-start event))
+         (str (car (posn-string posn)))
+         (str-pos (cdr (posn-string posn))))
+    (when (and str str-pos)
+      (get-text-property str-pos 'embr-tab-index str))))
 
 (defun embr--tab-bar-click (event)
   "Switch to the tab clicked in the tab bar."
   (interactive "e")
-  (let* ((posn (event-start event))
-         (idx (get-text-property (posn-point posn) 'embr-tab-index)))
-    (when idx
-      (embr--send `((cmd . "switch-tab") (index . ,idx))
-                  (lambda (resp)
-                    (embr--action-callback resp)
-                    (embr--update-tab-list-from-resp resp))))))
+  (when-let* ((idx (embr--tab-bar-event-index event)))
+    (embr--send `((cmd . "switch-tab") (index . ,idx))
+                (lambda (resp)
+                  (embr--action-callback resp)
+                  (embr--update-tab-list-from-resp resp)))))
 
 (defun embr--tab-bar-close (event)
   "Close the tab clicked in the tab bar."
   (interactive "e")
-  (let* ((posn (event-start event))
-         (idx (get-text-property (posn-point posn) 'embr-tab-index)))
-    (when idx
-      ;; Switch to the target tab first, then close it.
-      (embr--send `((cmd . "switch-tab") (index . ,idx))
-                  (lambda (_resp)
-                    (embr--send '((cmd . "close-tab"))
-                                (lambda (resp)
-                                  (embr--action-callback resp)
-                                  (embr--update-tab-list-from-resp resp))))))))
+  (when-let* ((idx (embr--tab-bar-event-index event)))
+    ;; Switch to the target tab first, then close it.
+    (embr--send `((cmd . "switch-tab") (index . ,idx))
+                (lambda (_resp)
+                  (embr--send '((cmd . "close-tab"))
+                              (lambda (resp)
+                                (embr--action-callback resp)
+                                (embr--update-tab-list-from-resp resp)))))))
 
 (defun embr--update-tab-list-from-resp (resp)
   "Update `embr--tab-list' from the `tabs' field in RESP if present."
@@ -1727,17 +1711,9 @@ Tabs are equal width and fill the window, like i3 tabbed layout."
       (embr--update-tab-list-from-resp resp))))
 
 (defun embr--refresh-tab-bar ()
-  "Update the tab bar display in the buffer by replacing line 1."
+  "Trigger a tab-line redisplay from cached tab list."
   (when (and embr-tab-bar embr--tab-list)
-    (let ((inhibit-read-only t))
-      (save-excursion
-        (goto-char (point-min))
-        (when (and (not (eobp))
-                   (get-text-property (point) 'cursor-intangible))
-          ;; Delete existing tab bar line (including newline).
-          (delete-region (point) (min (1+ (line-end-position)) (point-max))))
-        (goto-char (point-min))
-        (insert (embr--render-tab-bar) "\n")))))
+    (force-mode-line-update)))
 
 ;; ── Tabs ───────────────────────────────────────────────────────────
 
@@ -2561,6 +2537,8 @@ DESCRIPTION is shown in the prompt."
                               (propertize embr--current-title 'face 'bold))))
                          (unless (= embr--zoom-level 1.0)
                            (format " [%d%%]" (round (* embr--zoom-level 100))))))))
+  (when embr-tab-bar
+    (setq-local tab-line-format '(:eval (embr--render-tab-bar))))
   (add-hook 'pre-command-hook #'embr--maybe-end-search nil t)
   (add-hook 'kill-buffer-hook #'embr--kill-buffer-cleanup nil t))
 
