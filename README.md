@@ -143,7 +143,7 @@ All keys are forwarded directly to the browser. Typing, arrows, backspace, tab, 
 
 Pressing `C-c` opens a transient dispatch menu (like Magit). The prefix key is configurable via `embr-dispatch-key`, but the underlying keys follow eww conventions where possible and should be kept as-is. By learning embr keys, you learn eww keys too, so if eww is ever updated to handle the modern web, switching has no learning curve.
 
-![dispatch menu](assets/dispatch-menu.png)
+![dispatch menu](assets/dispatch.png)
 
 ### Bookmarks
 
