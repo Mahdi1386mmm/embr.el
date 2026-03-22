@@ -261,7 +261,7 @@ No.
 
 ### Can I install other Chromium extensions?
 
-The Chrome Web Store won't offer one-click install since embr is not a standard browser window. Instead, switch to `'headed` mode, navigate to `chrome://extensions`, enable Developer mode, and install the extension manually (drag a `.crx` or load unpacked). Extensions persist in your browser profile at `~/.local/share/embr/chromium-profile/`. Switch back to `'headed-offscreen` when done.
+The Chrome Web Store does not work with CloakBrowser (it fails the browser identity check). Instead, switch to `'headed` mode, navigate to `chrome://extensions`, enable Developer mode, and install the extension manually (drag a `.crx` or load unpacked). Extensions persist in your browser profile at `~/.local/share/embr/chromium-profile/`. Switch back to `'headed-offscreen` when done.
 
 Chromium extensions do not auto-update in embr. See how `setup.sh` keeps uBlock and Dark Reader current via the GitHub releases API, and consider a similar approach for any extensions you add.
 
