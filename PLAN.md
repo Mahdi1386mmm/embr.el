@@ -1,95 +1,188 @@
-# PLAN: Proxy Support (SOCKS5 / HTTP)
+# PLAN: In-Buffer Tab Bar
 
 ## Context
 
-Add proxy support to embr. Two defcustoms: `embr-proxy-type` (symbol, `'socks` or `'http`) and `embr-proxy-address` (string, host:port). Header line shows a red "PROXY" badge when the session is proxied. Proxy is a launch-time setting (Playwright constraint), so it applies per-session, not toggled mid-session.
+Add a clickable tab bar below the header line and above the rendered page. Users click a tab label to switch, or click "x" to close. Gated by `embr-tab-bar` defcustom (default nil).
 
-Covers Tor (`socks`, `127.0.0.1:9050`), I2P (`http`, `127.0.0.1:4444`), or any other SOCKS5/HTTP proxy.
+## Architecture Decision: In-Buffer Text
+
+Emacs does not support multiple header lines. `tab-line-format` renders ABOVE the header line, not below. A separate window adds complexity. The simplest approach: insert a propertized text line at the top of the buffer, before the image.
+
+The default backend already does `erase-buffer` + `insert-image` on every frame, so one extra line of text per frame is negligible. The canvas backend updates image data in-place via `image-flush`, so the tab bar line persists without re-insertion.
 
 ## Design
 
-- **`embr-proxy-type` defcustom**: symbol, default `nil`. `'socks` or `'http`. When nil, no proxy.
-- **`embr-proxy-address` defcustom**: string, default `"127.0.0.1:9050"`. The host:port of the proxy. Only used when `embr-proxy-type` is non-nil.
-- **`embr--proxy-active` buffer-local var**: the full proxy URL the current session was launched with (e.g. `"socks5://127.0.0.1:9050"`), or nil. Used for header line badge and buffer naming.
-- **Header line badge**: red "PROXY" badge when `embr--proxy-active` is non-nil.
-- **No separate entry point**: user sets `embr-proxy-type` and `embr-proxy-address` before launching. To switch, quit, change, relaunch.
+### Tab State
+
+- `embr--tab-list` buffer-local var: cached list of tabs from the daemon. Each entry is an alist: `index`, `title`, `url`, `active`.
+- Refreshed after tab-affecting commands: `new-tab`, `close-tab`, `switch-tab`.
+- Refreshed on startup after init.
+- Active tab title updates live via `embr--current-title` (existing metadata push). Other tabs update on next tab operation.
+
+### Rendering
+
+`embr--render-tab-bar` builds a single propertized string from `embr--tab-list`:
+
+```
+ Tab Title 1 x | *Active Tab x | Tab Title 3 x
+```
+
+- Active tab: bold, distinct background
+- Inactive tabs: subdued
+- Each label: `embr-tab-index` text property + keymap with `[mouse-1]` -> switch
+- Each "x": `embr-tab-index` text property + keymap with `[mouse-1]` -> close
+- Titles truncated to ~25 chars
+- Pipe separator between tabs
+- When only one tab exists, the tab bar still renders (single tab, no ambiguity)
+
+### Click Handling
+
+- `embr--tab-bar-click`: read index from `embr-tab-index` text property at event position, send `switch-tab`, refresh tab list in callback
+- `embr--tab-bar-close`: read index from text property, send `close-tab`, refresh tab list in callback
+
+### Frame Integration
+
+**Default backend** (`embr--default-display-frame`):
+```elisp
+(erase-buffer)
+(when (and embr-tab-bar embr--tab-list)
+  (insert (embr--render-tab-bar) "\n"))
+(insert-image ...)
+```
+
+Tab bar is rebuilt from cached `embr--tab-list` on every frame. No extra daemon calls.
+
+**Canvas backend** (`embr--backend-init-canvas`):
+```elisp
+(erase-buffer)
+(when (and embr-tab-bar embr--tab-list)
+  (insert (embr--render-tab-bar) "\n"))
+(insert (propertize " " 'display embr--canvas-image))
+```
+
+Canvas tab bar updates go through `embr--refresh-tab-bar`, which replaces only line 1 when tabs change. Frame blits do not touch the tab bar.
+
+### Tab List Refresh Flow
+
+`embr--refresh-tab-list`:
+1. Send `list-tabs` async
+2. Callback stores response in `embr--tab-list`
+3. Calls `embr--refresh-tab-bar`
+
+`embr--refresh-tab-bar`:
+- Default backend: no-op (next frame render rebuilds it from cache)
+- Canvas backend: delete line 1, insert new tab bar line (image is on line 2, untouched)
 
 ## Changes
 
-### 1. embr.el
+### embr.el
 
-**A. New defcustoms (after other defcustoms):**
+**A. New defcustom (after other defcustoms):**
 ```elisp
-(defcustom embr-proxy-type nil
-  "Proxy type for browser traffic.
-When non-nil, embr routes all traffic through the proxy at
-`embr-proxy-address'."
-  :type '(choice (const :tag "No proxy" nil)
-                 (const :tag "SOCKS5" socks)
-                 (const :tag "HTTP" http)))
-
-(defcustom embr-proxy-address "127.0.0.1:9050"
-  "Proxy host:port.  Only used when `embr-proxy-type' is non-nil."
-  :type 'string)
+(defcustom embr-tab-bar nil
+  "Non-nil means show a clickable tab bar above the page."
+  :type 'boolean)
 ```
 
-**B. New buffer-local var (near `embr--incognito-flag`):**
+**B. New faces:**
 ```elisp
-(defvar embr--proxy-active nil "Non-nil when this session uses a proxy.")
-```
-Make buffer-local in `embr-mode` (init to nil).
+(defface embr-tab-bar
+  '((t :background "gray20" :foreground "white"))
+  "Face for the tab bar background.")
 
-**C. Build proxy URL and pass in init params:**
-In `embr--build-init-params`, when `embr-proxy-type` is non-nil, build the full URL and include it:
+(defface embr-tab-active
+  '((t :inherit embr-tab-bar :weight bold :background "gray40"))
+  "Face for the active tab label.")
+
+(defface embr-tab-inactive
+  '((t :inherit embr-tab-bar))
+  "Face for inactive tab labels.")
+
+(defface embr-tab-close
+  '((t :inherit embr-tab-bar :foreground "gray60"))
+  "Face for the tab close button.")
+```
+
+**C. New buffer-local var:**
 ```elisp
-(when embr-proxy-type
-  (let ((scheme (pcase embr-proxy-type
-                  ('socks "socks5")
-                  ('http "http"))))
-    (push (cons 'proxy (format "%s://%s" scheme embr-proxy-address)) params)))
+(defvar embr--tab-list nil "Cached tab list from the daemon.")
 ```
+Make buffer-local in `embr-mode`.
 
-**D. Set `embr--proxy-active` after successful init:**
-In both `embr-browse` and `embr-browse-incognito`, after the init handshake succeeds:
+**D. Keymaps for click targets:**
 ```elisp
-(when embr-proxy-type
-  (setq embr--proxy-active t))
+(defvar embr--tab-label-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mouse-1] #'embr--tab-bar-click)
+    map)
+  "Keymap for clickable tab labels.")
+
+(defvar embr--tab-close-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mouse-1] #'embr--tab-bar-close)
+    map)
+  "Keymap for tab close buttons.")
 ```
 
-**E. Header line badge (after INCOGNITO badge, ~line 2247):**
+**E. `embr--render-tab-bar`:**
+Iterate `embr--tab-list`. For each tab:
+- Build label string: truncated title (or URL if title empty)
+- Apply `embr-tab-active` or `embr-tab-inactive` face
+- Add `embr-tab-index` text property
+- Add `keymap` text property (`embr--tab-label-map`)
+- Add `mouse-face` for hover
+- Append close button "x" with `embr--tab-close-map` keymap and `embr-tab-close` face
+- Join with pipe separator
+
+Override active tab title with `embr--current-title` for live updates.
+
+**F. Click handlers:**
 ```elisp
-(when embr--proxy-active
-  (propertize " PROXY " 'face '(:background "red" :foreground "white")))
+(defun embr--tab-bar-click (event)
+  "Switch to clicked tab."
+  (interactive "e")
+  ...)
+
+(defun embr--tab-bar-close (event)
+  "Close clicked tab."
+  (interactive "e")
+  ...)
 ```
+Both extract `embr-tab-index` from text property at event position.
 
-**F. Buffer rename logic:**
-In `embr--update-metadata`, extend the buffer name prefix to show proxy when active (alongside incognito check).
+**G. `embr--refresh-tab-list`:**
+Async `list-tabs` -> store in `embr--tab-list` -> call `embr--refresh-tab-bar`.
 
-**G. URL history:**
-Proxy sessions should not record URL history (same as incognito). Add `embr--proxy-active` checks alongside the existing `embr--incognito-flag` checks in `embr-navigate`.
+**H. `embr--refresh-tab-bar`:**
+Canvas: replace line 1 in-place. Default: no-op.
 
-### 2. embr.py
+**I. Modify `embr--default-display-frame`:**
+Insert tab bar line after `erase-buffer`, before `insert-image`.
 
-**A. Init handler -- accept proxy param:**
-In the `cmd == "init"` block, after `color_scheme` handling (~line 611):
-```python
-proxy = params.get("proxy")
-if proxy:
-    context_opts["proxy"] = {"server": proxy}
-    print(f"embr: proxy={proxy}", file=sys.stderr)
-```
+**J. Modify `embr--backend-init-canvas`:**
+Insert tab bar line before canvas space.
 
-That's it on the Python side. No env vars, no new module-level state.
+**K. Hook tab commands:**
+After `embr-new-tab`, `embr-close-tab`, `embr-next-tab`, `embr-prev-tab` callbacks, call `embr--refresh-tab-list`.
 
-### 3. README.md
+**L. Initial fetch:**
+After init in `embr-browse`, if `embr-tab-bar` is non-nil, call `embr--refresh-tab-list`.
 
-- Add `embr-proxy-type` and `embr-proxy-address` to the configuration table.
-- Brief usage note about proxy support (Tor/I2P examples).
+### embr.py
+
+No changes. Existing `list-tabs` returns everything needed.
+
+### README.md
+
+- Add `embr-tab-bar` to config table.
 
 ## Verification
 
-1. `make test` (checkparens, bytecompile, checkpy, shellcheck)
-2. Manual: set `embr-proxy-type` to `'socks`, launch, verify traffic routes through proxy
-3. Verify header line shows red "PROXY" badge
-4. Verify nil type launches without proxy (no badge)
-5. Verify proxy works with incognito sessions
+1. `make test`
+2. Set `embr-tab-bar` to t, open embr, verify bar appears
+3. Open multiple tabs, verify labels update
+4. Click tab labels to switch
+5. Click "x" to close tabs
+6. Verify both default and canvas backends
+7. Verify bar hidden when `embr-tab-bar` is nil
+8. Verify single-tab display (no crash, no empty bar)

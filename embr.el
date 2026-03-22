@@ -248,6 +248,23 @@ Must be set before embr is loaded."
   "Non-nil means start in normal mode when `embr-vimium-mode' is enabled."
   :type 'boolean)
 
+(defcustom embr-tab-bar nil
+  "Non-nil means show a clickable tab bar above the page."
+  :type 'boolean)
+
+(defcustom embr-home-url "about:blank"
+  "URL to navigate to when embr is launched interactively.
+Only used when `embr-session-restore' is nil or there is no saved
+session.  When a session is restored, the saved tabs are opened
+instead."
+  :type 'string)
+
+(defcustom embr-session-restore nil
+  "Non-nil means save and restore open tabs across sessions.
+On quit, tab URLs are saved to a file.  On next launch, tabs are
+reopened automatically."
+  :type 'boolean)
+
 (defcustom embr-proxy-type nil
   "Proxy type for browser traffic.
 `socks' for SOCKS5 (e.g. Tor on port 9050), `http' for HTTP
@@ -264,6 +281,26 @@ For Tor, set `embr-proxy-type' to `socks' and this to
 and this to \"127.0.0.1:4444\"."
   :type '(choice (const :tag "None" nil)
                  (string :tag "host:port")))
+
+(defface embr-tab-bar
+  '((t :background "gray20" :foreground "white"))
+  "Face for the tab bar background."
+  :group 'embr)
+
+(defface embr-tab-active
+  '((t :inherit embr-tab-bar :weight bold :background "gray40"))
+  "Face for the active tab label."
+  :group 'embr)
+
+(defface embr-tab-inactive
+  '((t :inherit embr-tab-bar))
+  "Face for inactive tab labels."
+  :group 'embr)
+
+(defface embr-tab-close
+  '((t :inherit embr-tab-bar :foreground "gray60"))
+  "Face for the tab close button."
+  :group 'embr)
 
 (defun embr--search-url (query)
   "Build a search URL for QUERY using `embr-search-engine'.
@@ -507,6 +544,7 @@ Does not remove the Emacs package itself."
 (defvar embr--incognito-flag nil "Non-nil when this buffer is an incognito session.")
 (defvar embr--proxy-active nil "Non-nil when this session uses a proxy.")
 (defvar embr--muted-flag nil "Non-nil when audio/video is muted.")
+(defvar embr--tab-list nil "Cached tab list from the daemon.")
 
 ;; ── Process management ─────────────────────────────────────────────
 
@@ -737,9 +775,12 @@ SOCKET-PATH is the daemon frame socket (used by canvas backend)."
                    (buffer-string))))
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (insert-image (create-image data 'jpeg t))
-        (remove-text-properties (point-min) (point-max) '(keymap nil))
-        (put-text-property (point-min) (point-max) 'pointer 'arrow)
+        (when (and embr-tab-bar embr--tab-list)
+          (insert (embr--render-tab-bar) "\n"))
+        (let ((img-start (point)))
+          (insert-image (create-image data 'jpeg t))
+          (remove-text-properties img-start (point-max) '(keymap nil))
+          (put-text-property img-start (point-max) 'pointer 'arrow))
         (goto-char (point-min))))
     (cl-incf embr--default-frame-count)))
 
@@ -819,8 +860,11 @@ Connect to SOCKET-PATH and create the canvas image in the buffer."
         embr--canvas-stale-count 0)
   (let ((inhibit-read-only t))
     (erase-buffer)
-    (insert (propertize " " 'display embr--canvas-image))
-    (put-text-property (point-min) (point-max) 'pointer 'arrow)
+    (when (and embr-tab-bar embr--tab-list)
+      (insert (embr--render-tab-bar) "\n"))
+    (let ((img-start (point)))
+      (insert (propertize " " 'display embr--canvas-image))
+      (put-text-property img-start (point-max) 'pointer 'arrow))
     (goto-char (point-min)))
   ;; Connect to the daemon's frame socket.
   (setq embr--canvas-socket
@@ -1042,9 +1086,84 @@ Reads the History SQLite database directly.  Requires sqlite3 on PATH."
   (embr--send '((cmd . "navigate") (url . "chrome://downloads"))
               #'embr--action-callback))
 
+(defvar embr--session-file
+  (expand-file-name "session.json" embr--data-dir)
+  "File where session tab URLs are saved for restore.")
+
+(defvar embr--use-custom-session t
+  "Non-nil to use embr's own session save/restore.")
+
+(defun embr--save-session ()
+  "Save current tab URLs and active index to the session file."
+  (when (and embr--use-custom-session
+             embr-session-restore
+             (not embr--incognito-flag)
+             embr--tab-list)
+    (let* ((active-idx 0)
+           (urls nil)
+           (i 0))
+      (dolist (tab embr--tab-list)
+        (let ((url (alist-get 'url tab)))
+          (unless (string= url "about:blank")
+            (when (eq (alist-get 'active tab) t)
+              (setq active-idx (length urls)))
+            (push url urls)))
+        (setq i (1+ i)))
+      (setq urls (nreverse urls))
+      (when urls
+        (with-temp-file embr--session-file
+          (insert (json-serialize
+                   `((urls . ,(vconcat urls))
+                     (active . ,active-idx)))))))))
+
+(defun embr--save-session-on-exit ()
+  "Save session for the normal buffer on Emacs exit."
+  (when (and embr--use-custom-session embr-session-restore
+             (buffer-live-p embr--normal-buffer))
+    (with-current-buffer embr--normal-buffer
+      (embr--save-session))))
+
+(add-hook 'kill-emacs-hook #'embr--save-session-on-exit)
+
+(defun embr--restore-session ()
+  "Restore tabs from the session file.
+Return the number of tabs restored, or nil."
+  (when (and embr--use-custom-session
+             embr-session-restore
+             (not embr--incognito-flag)
+             (file-exists-p embr--session-file))
+    (let* ((json-str (with-temp-buffer
+                       (insert-file-contents embr--session-file)
+                       (buffer-string)))
+           (data (json-parse-string json-str :object-type 'alist
+                                             :array-type 'list))
+           ;; Support both old format (plain URL array) and new format.
+           (urls (if (alist-get 'urls data)
+                     (alist-get 'urls data)
+                   data))
+           (active (or (alist-get 'active data) 0))
+           (count 0))
+      (delete-file embr--session-file)
+      (when urls
+        ;; Navigate the initial tab to the first URL.
+        (embr--send-sync `((cmd . "navigate") (url . ,(car urls))))
+        (setq count 1)
+        ;; Open remaining URLs as new tabs.
+        (dolist (url (cdr urls))
+          (let ((r (embr--send-sync `((cmd . "new-tab") (url . ,url)))))
+            (when (alist-get 'ok r)
+              (setq count (1+ count)))))
+        ;; Switch to the tab that was active when session was saved.
+        (embr--send-sync `((cmd . "switch-tab") (index . ,active)))
+        ;; Update tab list with all tabs present.
+        (let ((tr (embr--send-sync '((cmd . "list-tabs")))))
+          (embr--update-tab-list-from-resp tr))
+        count))))
+
 (defun embr-quit ()
   "Kill the daemon and close the buffer."
   (interactive)
+  (embr--save-session)
   (when (and embr--process (process-live-p embr--process))
     (embr--send '((cmd . "quit")))
     (sit-for 0.5)
@@ -1058,11 +1177,22 @@ Reads the History SQLite database directly.  Requires sqlite3 on PATH."
 
 (defun embr-mouse-handler (event)
   "Handle mouse press, track drag, and forward to browser.
-Dispatch method depends on `embr-click-method'."
+Dispatch method depends on `embr-click-method'.  Clicks on the
+tab bar are dispatched to the tab bar keymap instead."
   (interactive "e")
-  (pcase embr-click-method
-    ('immediate (embr--mouse-immediate event))
-    (_ (embr--mouse-atomic event))))
+  (let* ((posn (event-start event))
+         (pt (posn-point posn)))
+    (if (and pt embr-tab-bar
+             (get-text-property pt 'embr-tab-index))
+        ;; Click is on the tab bar.  Dispatch to the text property keymap.
+        (let ((map (get-text-property pt 'keymap)))
+          (when map
+            (let ((binding (lookup-key map [mouse-1])))
+              (when binding
+                (funcall binding event)))))
+      (pcase embr-click-method
+        ('immediate (embr--mouse-immediate event))
+        (_ (embr--mouse-atomic event))))))
 
 (defun embr--mouse-immediate (event)
   "Send mousedown immediately, then mouseup on release."
@@ -1186,8 +1316,8 @@ BUF is the embr buffer that owns this timer."
               (when img-y
                 (setq img-y (max 0 (min img-y (1- (or embr--viewport-height embr-default-height))))))
               ;; Distance threshold: filter sub-pixel jitter.
-              (let* ((dx (- img-x (or embr--hover-last-x img-x)))
-                     (dy (- img-y (or embr--hover-last-y img-y)))
+              (let* ((dx (- (or img-x 0) (or embr--hover-last-x img-x 0)))
+                     (dy (- (or img-y 0) (or embr--hover-last-y img-y 0)))
                      (dist (sqrt (+ (* dx dx) (* dy dy))))
                      ;; Rate self-throttle: use min rate under pressure.
                      (rate (if embr--pressure embr-hover-rate-min embr-hover-rate))
@@ -1495,6 +1625,122 @@ With prefix argument, prompt for a URL instead."
         (setq embr--search-query query)
         (embr--find-on-page t)))))
 
+;; ── Tab bar ────────────────────────────────────────────────────────
+
+(defvar embr--tab-label-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mouse-1] #'embr--tab-bar-click)
+    map)
+  "Keymap for clickable tab labels in the tab bar.")
+
+(defvar embr--tab-close-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mouse-1] #'embr--tab-bar-close)
+    map)
+  "Keymap for tab close buttons in the tab bar.")
+
+(defun embr--truncate-tab-title (title max-len)
+  "Truncate TITLE to MAX-LEN chars, adding ellipsis if needed."
+  (if (> (length title) max-len)
+      (concat (substring title 0 (- max-len 1)) "\u2026")
+    title))
+
+(defun embr--render-tab-bar ()
+  "Build a propertized tab bar string from `embr--tab-list'.
+Tabs are equal width and fill the window, like i3 tabbed layout."
+  (let* ((ntabs (length embr--tab-list))
+         (win-width (or (window-width) 80))
+         ;; Each tab gets equal share.  Account for separators (1 char each).
+         (sep-total (1- ntabs))
+         (tab-width (max 8 (/ (- win-width sep-total) ntabs)))
+         ;; Close button " [x] " takes 5 chars, label gets the rest.
+         (label-width (- tab-width 5))
+         (parts nil))
+    (dolist (tab embr--tab-list)
+      (let* ((idx (alist-get 'index tab))
+             (active (eq (alist-get 'active tab) t))
+             (title (or (and active
+                             (not (string-empty-p embr--current-title))
+                             embr--current-title)
+                        (alist-get 'title tab)
+                        (alist-get 'url tab)
+                        "untitled"))
+             (label (embr--truncate-tab-title title (- label-width 1)))
+             ;; Pad label to fixed width.
+             (padded (concat " " label
+                             (make-string (max 0 (- label-width 1 (length label))) ?\s)))
+             (face (if active 'embr-tab-active 'embr-tab-inactive))
+             (tab-str (propertize padded
+                                  'face face
+                                  'mouse-face 'highlight
+                                  'keymap embr--tab-label-map
+                                  'embr-tab-index idx
+                                  'pointer 'hand))
+             (close-str (propertize " [x] "
+                                    'face 'embr-tab-close
+                                    'mouse-face '(:background "red" :foreground "white")
+                                    'keymap embr--tab-close-map
+                                    'embr-tab-index idx
+                                    'pointer 'hand)))
+        (push (concat tab-str close-str) parts)))
+    (propertize
+     (mapconcat #'identity (nreverse parts)
+                (propertize "|" 'face 'embr-tab-bar))
+     'cursor-intangible t)))
+
+(defun embr--tab-bar-click (event)
+  "Switch to the tab clicked in the tab bar."
+  (interactive "e")
+  (let* ((posn (event-start event))
+         (idx (get-text-property (posn-point posn) 'embr-tab-index)))
+    (when idx
+      (embr--send `((cmd . "switch-tab") (index . ,idx))
+                  (lambda (resp)
+                    (embr--action-callback resp)
+                    (embr--update-tab-list-from-resp resp))))))
+
+(defun embr--tab-bar-close (event)
+  "Close the tab clicked in the tab bar."
+  (interactive "e")
+  (let* ((posn (event-start event))
+         (idx (get-text-property (posn-point posn) 'embr-tab-index)))
+    (when idx
+      ;; Switch to the target tab first, then close it.
+      (embr--send `((cmd . "switch-tab") (index . ,idx))
+                  (lambda (_resp)
+                    (embr--send '((cmd . "close-tab"))
+                                (lambda (resp)
+                                  (embr--action-callback resp)
+                                  (embr--update-tab-list-from-resp resp))))))))
+
+(defun embr--update-tab-list-from-resp (resp)
+  "Update `embr--tab-list' from the `tabs' field in RESP if present."
+  (when-let* ((tabs (alist-get 'tabs resp)))
+    (setq embr--tab-list
+          (mapcar (lambda (v) (append v nil)) tabs))
+    (embr--refresh-tab-bar)))
+
+(defun embr--refresh-tab-list ()
+  "Fetch tab list from daemon and update the tab bar."
+  (when (and embr-tab-bar embr--process (process-live-p embr--process))
+    (let ((resp (embr--send-sync '((cmd . "list-tabs")))))
+      (embr--update-tab-list-from-resp resp))))
+
+(defun embr--refresh-tab-bar ()
+  "Update the tab bar display in the buffer.
+For canvas backend, replace line 1.  For default, next frame handles it."
+  (when (and embr-tab-bar embr--tab-list
+             (string= embr--active-backend "canvas"))
+    (let ((inhibit-read-only t))
+      (save-excursion
+        (goto-char (point-min))
+        (when (and (not (eobp))
+                   (get-text-property (point) 'cursor-intangible))
+          ;; Delete existing tab bar line (including newline).
+          (delete-region (point) (min (1+ (line-end-position)) (point-max))))
+        (goto-char (point-min))
+        (insert (embr--render-tab-bar) "\n")))))
+
 ;; ── Tabs ───────────────────────────────────────────────────────────
 
 (defun embr-new-tab (url)
@@ -1505,42 +1751,50 @@ With prefix argument, prompt for a URL instead."
                                       (unless embr--incognito-flag 'embr--url-history))))
   (let ((target (embr--maybe-search-url url)))
     (embr--send `((cmd . "new-tab") (url . ,target))
-                       #'embr--action-callback)))
+                (lambda (resp)
+                  (embr--action-callback resp)
+                  (embr--update-tab-list-from-resp resp)))))
 
 (defun embr-close-tab ()
   "Close the current tab."
   (interactive)
   (embr--send '((cmd . "close-tab"))
-                     #'embr--action-callback))
+              (lambda (resp)
+                (embr--action-callback resp)
+                (embr--update-tab-list-from-resp resp))))
 
 (defun embr-next-tab ()
   "Switch to the next tab."
   (interactive)
   (embr--send '((cmd . "list-tabs"))
-                     (lambda (resp)
-                       (if-let* ((err (alist-get 'error resp)))
-                           (message "embr error: %s" err)
-                         (let* ((tabs (alist-get 'tabs resp))
-                                (cur (seq-position tabs t
-                                       (lambda (tab _) (eq (alist-get 'active tab) t))))
-                                (next (if cur (mod (1+ cur) (length tabs)) 0)))
-                           (embr--send `((cmd . "switch-tab") (index . ,next))
-                                              #'embr--action-callback))))))
+              (lambda (resp)
+                (if-let* ((err (alist-get 'error resp)))
+                    (message "embr error: %s" err)
+                  (let* ((tabs (alist-get 'tabs resp))
+                         (cur (seq-position tabs t
+                                (lambda (tab _) (eq (alist-get 'active tab) t))))
+                         (next (if cur (mod (1+ cur) (length tabs)) 0)))
+                    (embr--send `((cmd . "switch-tab") (index . ,next))
+                                (lambda (r)
+                                  (embr--action-callback r)
+                                  (embr--update-tab-list-from-resp r))))))))
 
 (defun embr-prev-tab ()
   "Switch to the previous tab."
   (interactive)
   (embr--send '((cmd . "list-tabs"))
-                     (lambda (resp)
-                       (if-let* ((err (alist-get 'error resp)))
-                           (message "embr error: %s" err)
-                         (let* ((tabs (alist-get 'tabs resp))
-                                (cur (seq-position tabs t
-                                       (lambda (tab _) (eq (alist-get 'active tab) t))))
-                                (prev (if cur (mod (1- cur) (length tabs))
-                                        (1- (length tabs)))))
-                           (embr--send `((cmd . "switch-tab") (index . ,prev))
-                                              #'embr--action-callback))))))
+              (lambda (resp)
+                (if-let* ((err (alist-get 'error resp)))
+                    (message "embr error: %s" err)
+                  (let* ((tabs (alist-get 'tabs resp))
+                         (cur (seq-position tabs t
+                                (lambda (tab _) (eq (alist-get 'active tab) t))))
+                         (prev (if cur (mod (1- cur) (length tabs))
+                                 (1- (length tabs)))))
+                    (embr--send `((cmd . "switch-tab") (index . ,prev))
+                                (lambda (r)
+                                  (embr--action-callback r)
+                                  (embr--update-tab-list-from-resp r))))))))
 
 (defun embr-list-tabs ()
   "List all tabs and switch to the selected one."
@@ -1884,12 +2138,18 @@ If the mouse is not over a link, fall back to hint selection."
               (setq embr--process nil)
               (error "embr incognito: init failed: %s" (alist-get 'error resp)))
           (setq embr--frame-path (alist-get 'frame_path resp))
+          (when embr-proxy-type
+            (setq embr--proxy-active t))
+          (when embr-tab-bar
+            (let ((tr (embr--send-sync '((cmd . "list-tabs")))))
+              (unless (alist-get 'error tr)
+                (setq embr--tab-list
+                      (mapcar (lambda (v) (append v nil))
+                              (alist-get 'tabs tr))))))
           (embr--hover-start)
           (embr--backend-init
            (or (alist-get 'render_backend resp) "default")
            (alist-get 'frame_socket_path resp))
-          (when embr-proxy-type
-            (setq embr--proxy-active t))
           (message "embr incognito: %s transport, %s backend"
                    (or (alist-get 'frame_source resp) "unknown")
                    (embr--backend-name))))))
@@ -2119,6 +2379,12 @@ DESCRIPTION is shown in the prompt."
    ("q" "Close menu" embr-dispatch-close)
    ("<escape>" "Close menu" embr-dispatch-close)])
 
+(defun embr-home ()
+  "Navigate to `embr-home-url'."
+  (interactive)
+  (embr--send `((cmd . "navigate") (url . ,embr-home-url))
+              #'embr--action-callback))
+
 (defun embr-dispatch-close ()
   "Close the dispatch menu."
   (interactive))
@@ -2129,6 +2395,7 @@ DESCRIPTION is shown in the prompt."
     ("g" "Reload" embr-refresh)
     ("l" "Back" embr-back)
     ("r" "Forward" embr-forward)
+    ("<home>" "Home" embr-home)
     ("h" "History" embr-history-persistent)
     ("H" "Download history" embr-download-history)]
    ["Tabs"
@@ -2262,6 +2529,7 @@ DESCRIPTION is shown in the prompt."
   (setq-local embr--incognito-flag nil)
   (setq-local embr--proxy-active nil)
   (setq-local embr--muted-flag nil)
+  (setq-local embr--tab-list nil)
   (setq-local buffer-read-only t)
   (setq-local cursor-type nil)
   (setq-local void-text-area-pointer 'arrow)
@@ -2283,12 +2551,12 @@ DESCRIPTION is shown in the prompt."
                          (when embr--proxy-active
                            (propertize " PROXY " 'face '(:background "red" :foreground "white")))
                          " "
-                         (if (string-empty-p embr--current-title)
-                             (propertize url 'face 'shadow)
-                           (concat
-                            (propertize url 'face 'shadow)
-                            (propertize " — " 'face 'shadow)
-                            (propertize embr--current-title 'face 'bold)))
+                         (propertize url 'face 'shadow)
+                         (unless embr-tab-bar
+                           (unless (string-empty-p embr--current-title)
+                             (concat
+                              (propertize " — " 'face 'shadow)
+                              (propertize embr--current-title 'face 'bold))))
                          (unless (= embr--zoom-level 1.0)
                            (format " [%d%%]" (round (* embr--zoom-level 100))))))))
   (add-hook 'pre-command-hook #'embr--maybe-end-search nil t)
@@ -2296,6 +2564,7 @@ DESCRIPTION is shown in the prompt."
 
 (defun embr--kill-buffer-cleanup ()
   "Shut down the daemon when the buffer is killed by any means."
+  (embr--save-session)
   (when (and embr--process (process-live-p embr--process))
     (process-send-string
      embr--process
@@ -2356,6 +2625,7 @@ DESCRIPTION is shown in the prompt."
     ("g" "Reload" embr-refresh)
     ("l" "Back" embr-back)
     ("r" "Forward" embr-forward)
+    ("<home>" "Home" embr-home)
     ("h" "History" embr-history-persistent)
     ("H" "Download history" embr-download-history)]
    ["Tabs"
@@ -2523,10 +2793,11 @@ In insert mode, keys pass through to the browser."
                             embr-proxy-address))))))
 
 ;;;###autoload
-(defun embr-browse (url &optional _new-window)
+(defun embr-browse (&optional url _new-window)
   "Launch embr and navigate to URL.
-If the daemon is already running, just navigate to the new URL."
-  (interactive "sURL: ")
+When called interactively, open about:blank.  When called from
+Lisp with a URL argument, navigate to that URL."
+  (interactive)
   ;; Check if setup has been run.
   (when (embr--setup-needed-p)
     (if (y-or-n-p "embr: Setup needed (venv or CloakBrowser missing). Run now? ")
@@ -2554,18 +2825,31 @@ If the daemon is already running, just navigate to the new URL."
               (error "embr: init failed: %s" (alist-get 'error resp)))
           ;; Daemon tells us where it writes frames.
           (setq embr--frame-path (alist-get 'frame_path resp))
+          (when embr-proxy-type
+            (setq embr--proxy-active t))
+          ;; Restore session or navigate before starting frames.
+          (let ((restored (embr--restore-session)))
+            (if restored
+                (message "embr: session restored (%d tab%s)"
+                         restored (if (= restored 1) "" "s"))
+              (embr--send-sync
+               `((cmd . "navigate")
+                 (url . ,(or url embr-home-url))))))
+          ;; Populate tab list after all tabs exist, before first frame.
+          (when embr-tab-bar
+            (let ((tr (embr--send-sync '((cmd . "list-tabs")))))
+              (unless (alist-get 'error tr)
+                (setq embr--tab-list
+                      (mapcar (lambda (v) (append v nil))
+                              (alist-get 'tabs tr))))))
           (embr--hover-start)
           (embr--backend-init
            (or (alist-get 'render_backend resp) "default")
            (alist-get 'frame_socket_path resp))
-          (when embr-proxy-type
-            (setq embr--proxy-active t))
           (message "embr: %s transport, %s backend"
                    (or (alist-get 'frame_source resp) "unknown")
                    (embr--backend-name))))))
-  ;; Show buffer and navigate.
-  (switch-to-buffer embr--normal-buffer)
-  (embr-navigate url))
+  (switch-to-buffer embr--normal-buffer))
 
 (provide 'embr)
 

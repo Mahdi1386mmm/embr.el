@@ -33,7 +33,11 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
         embr-scroll-step 100
         embr-frame-source 'screencast
         embr-render-backend 'default
-        embr-display-method 'headless))
+        embr-display-method 'headless
+        embr-home-url "about:blank"
+        embr-session-restore nil
+        embr-proxy-type nil
+        embr-proxy-address nil))
 ```
 
 **straight.el**
@@ -57,7 +61,11 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
         embr-scroll-step 100
         embr-frame-source 'screencast
         embr-render-backend 'default
-        embr-display-method 'headless))
+        embr-display-method 'headless
+        embr-home-url "about:blank"
+        embr-session-restore nil
+        embr-proxy-type nil
+        embr-proxy-address nil))
 ```
 
 **Tip:** Make embr your default Emacs browser and enable clickable URLs everywhere:
@@ -124,6 +132,9 @@ All management is done from Emacs, no terminal needed. `setup.sh` builds in a te
 | `embr-dispatch-key` | string | `"C-c"` | Key that opens the transient dispatch menu. Must be set before embr is loaded. |
 | `embr-vimium-leader` | string | `"SPC"` | Key that opens the dispatch menu in vimium normal mode. |
 | `embr-vimium-start-in-normal` | boolean | `t` | Start in normal mode when `embr-vimium-mode` is enabled. |
+| `embr-tab-bar` | boolean | `nil` | Non-nil means show a clickable tab bar above the page. Click to switch, click "x" to close. |
+| `embr-home-url` | string | `"about:blank"` | URL to navigate to when embr is launched interactively. |
+| `embr-session-restore` | boolean | `nil` | Non-nil means save and restore open tabs across sessions. |
 | `embr-proxy-type` | symbol/nil | `nil` | `'socks` (SOCKS5) or `'http` (HTTP). When non-nil, routes all browser traffic through `embr-proxy-address`. Header line shows a red "PROXY" badge when active. |
 | `embr-proxy-address` | string/nil | `nil` | Proxy host:port. Only used when `embr-proxy-type` is non-nil. E.g. `"127.0.0.1:9050"` for Tor, `"127.0.0.1:4444"` for I2P. |
 

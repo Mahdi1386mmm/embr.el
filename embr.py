@@ -1048,6 +1048,18 @@ else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
             await page.select_option(params["selector"], params["value"])
             return {"ok": True}
 
+        async def _tab_list():
+            """Build tab list for inclusion in responses."""
+            tabs = []
+            for i, p in enumerate(context.pages):
+                try:
+                    t = await p.title()
+                except Exception:
+                    t = ""
+                tabs.append({"index": i, "title": t, "url": p.url,
+                             "active": p == page})
+            return tabs
+
         if cmd == "new-tab":
             if screencast_active:
                 await stop_screencast()
@@ -1066,7 +1078,8 @@ else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
             except Exception:
                 pass
             return {"ok": True, "tab_index": len(context.pages) - 1,
-                    "url": page.url, "title": cached_title}
+                    "url": page.url, "title": cached_title,
+                    "tabs": await _tab_list()}
 
         if cmd == "close-tab":
             if len(context.pages) <= 1:
@@ -1084,14 +1097,11 @@ else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
             except Exception:
                 pass
             return {"ok": True, "tab_index": len(context.pages) - 1,
-                    "url": page.url, "title": cached_title}
+                    "url": page.url, "title": cached_title,
+                    "tabs": await _tab_list()}
 
         if cmd == "list-tabs":
-            tabs = []
-            for i, p in enumerate(context.pages):
-                tabs.append({"index": i, "title": await p.title(), "url": p.url,
-                             "active": p == page})
-            return {"ok": True, "tabs": tabs}
+            return {"ok": True, "tabs": await _tab_list()}
 
         if cmd == "switch-tab":
             idx = params["index"]
@@ -1107,7 +1117,8 @@ else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
                     cached_title = await page.title()
                 except Exception:
                     pass
-                return {"ok": True, "url": page.url, "title": cached_title}
+                return {"ok": True, "url": page.url, "title": cached_title,
+                        "tabs": await _tab_list()}
             return {"error": f"tab index out of range: {idx}"}
 
         if cmd == "zoom-in":
