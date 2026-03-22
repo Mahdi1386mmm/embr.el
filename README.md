@@ -20,6 +20,7 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
   :ensure (:host github
            :repo "emacs-os/embr.el"
            :files ("*.el" "*.py" "*.sh" "native/*.c" "native/Makefile"))
+  ;; :hook (embr-mode . embr-vimium-mode)
   :config
   (setq embr-hover-rate 30
         embr-default-width 1280
@@ -43,6 +44,7 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
   :straight (:host github
              :repo "emacs-os/embr.el"
              :files ("*.el" "*.py" "*.sh" "native/*.c" "native/Makefile"))
+  ;; :hook (embr-mode . embr-vimium-mode)
   :config
   (setq embr-hover-rate 30
         embr-default-width 1280
@@ -120,6 +122,8 @@ All management is done from Emacs, no terminal needed. `setup.sh` builds in a te
 | `embr-render-backend` | symbol | `'default` | `'default` uses JPEG file + create-image. `'canvas` requires canvas-patched Emacs. |
 | `embr-display-method` | symbol | `'headless` | `'headless`, `'headed` (requires Xvfb), `'headed-offscreen` (requires Xvfb). |
 | `embr-dispatch-key` | string | `"C-c"` | Key that opens the transient dispatch menu. Must be set before embr is loaded. |
+| `embr-vimium-leader` | string | `"SPC"` | Key that opens the dispatch menu in vimium normal mode. |
+| `embr-vimium-start-in-normal` | boolean | `t` | Start in normal mode when `embr-vimium-mode` is enabled. |
 
 
 ## Usage
@@ -130,7 +134,7 @@ M-x embr-browse RET example.com RET
 
 ## Keybindings
 
-All keys are forwarded directly to the browser. Typing, arrows, backspace, tab, and enter work as expected. `C-x`, `M-x`, etc. stay free for Emacs. Top-level keybindings translate familiar Emacs motion keys into browser equivalents (`C-c ?` to view them all).
+All keys are forwarded directly to the browser. Typing, arrows, backspace, tab, and enter work as expected. `C-x`, `M-x`, etc. stay free for Emacs. Top-level keybindings translate familiar Emacs motion keys into browser equivalents (`C-c ?` to view them all). `M-<` and `M->` go to the top and bottom of the page. For vim-style modal navigation, enable `embr-vimium-mode`.
 
 ![top-level bindkeys](assets/toplevel-bindkeys.png)
 
@@ -187,7 +191,11 @@ Mic, camera, and screen sharing do not work.
 
 ### Will you add vim-like modal keybindings (like Vimium)?
 
-No plans to add this upstream, but PRs are welcome. If you implement it, gate it behind a `defcustom` (e.g. `embr-keymap-style` with `'default` and `'vimium` options) and make sure the default behavior is unchanged. Do not break existing keybindings.
+`embr-vimium-mode` is an opt-in minor mode. Off by default, zero impact on existing keybindings. Normal mode gives you `hjkl`, `gg`/`G`, `C-d`/`C-u`, `/`/`?` for search, and `i` to enter insert mode. Insert mode passes keys through to the browser. `C-g` or `ESC` returns to normal mode.
+
+```elisp
+(add-hook 'embr-mode-hook #'embr-vimium-mode)
+```
 
 ### How do I search?
 

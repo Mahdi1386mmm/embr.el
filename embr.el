@@ -240,6 +240,14 @@ at the cost of hover precision."
 Must be set before embr is loaded."
   :type 'string)
 
+(defcustom embr-vimium-leader "SPC"
+  "Key that opens the dispatch menu in vimium normal mode."
+  :type 'string)
+
+(defcustom embr-vimium-start-in-normal t
+  "Non-nil means start in normal mode when `embr-vimium-mode' is enabled."
+  :type 'boolean)
+
 (defun embr--search-url (query)
   "Build a search URL for QUERY using `embr-search-engine'.
 Return a URL string.  If `embr-search-engine' is a function, call it
@@ -1890,6 +1898,8 @@ If the mouse is not over a link, fall back to hint selection."
     ("<next>" "PageDown")
     ("<escape>" "Escape")
     ("<f5>" "F5")
+    ("M-<" "Home")
+    ("M->" "End")
     (_ key)))
 
 (defun embr-self-insert ()
@@ -1917,7 +1927,9 @@ If the mouse is not over a link, fall back to hint selection."
     ("C-e" "End" embr-self-insert :transient nil)
     ("C-d" "Delete" embr-self-insert :transient nil)
     ("M-f" "Word right" embr-self-insert :transient nil)
-    ("M-b" "Word left" embr-self-insert :transient nil)]
+    ("M-b" "Word left" embr-self-insert :transient nil)
+    ("M-<" "Top of page" embr-self-insert :transient nil)
+    ("M->" "Bottom of page" embr-self-insert :transient nil)]
    ["Scroll / Page"
     ("C-v" "Page down" embr-self-insert :transient nil)
     ("M-v" "Page up" embr-self-insert :transient nil)]
@@ -1935,7 +1947,8 @@ If the mouse is not over a link, fall back to hint selection."
     ("C-l" "Navigate" embr-navigate)
     ("&"   "External player" embr-play-external)
     ("<f5>" "Refresh" embr-refresh)
-    ("q" "Close menu" embr-dispatch-close)]])
+    ("q" "Close menu" embr-dispatch-close)
+    ("<escape>" "Close menu" embr-dispatch-close)]])
 
 ;; ── Privacy: data clearing ────────────────────────────────────────
 ;;
@@ -2070,7 +2083,8 @@ DESCRIPTION is shown in the prompt."
    ("d" "Downloads" embr-chrome-downloads)
    ("h" "History" embr-chrome-history)
    ("g" "GPU" embr-chrome-gpu)
-   ("q" "Close menu" embr-dispatch-close)])
+   ("q" "Close menu" embr-dispatch-close)
+   ("<escape>" "Close menu" embr-dispatch-close)])
 
 (defun embr-dispatch-close ()
   "Close the dispatch menu."
@@ -2121,6 +2135,7 @@ DESCRIPTION is shown in the prompt."
    ["Other"
     ("k" "Kill embr" embr-quit)
     ("q" "Close menu" embr-dispatch-close)
+    ("<escape>" "Close menu" embr-dispatch-close)
     ("z" "Chrome internals" embr-dispatch-chrome)
     ("?" "Top-level bindkeys" embr-dispatch-keys)]])
 
@@ -2154,6 +2169,8 @@ DESCRIPTION is shown in the prompt."
     (define-key map (kbd "C-d") #'embr-self-insert)
     (define-key map (kbd "M-f") #'embr-self-insert)
     (define-key map (kbd "M-b") #'embr-self-insert)
+    (define-key map (kbd "M-<") #'embr-self-insert)
+    (define-key map (kbd "M->") #'embr-self-insert)
     (define-key map (kbd "M-w") #'embr-copy)
     (define-key map (kbd "C-y") #'embr-paste)
     (define-key map (kbd "C-s") #'embr-isearch-forward)
@@ -2220,6 +2237,10 @@ DESCRIPTION is shown in the prompt."
                                      (concat (substring embr--current-url 0 40) "...")
                                    embr--current-url)))
                         (concat
+                         (when (bound-and-true-p embr-vimium-mode)
+                           (if embr-vimium--insert-mode
+                               (propertize " INSERT " 'face '(:background "#22863a" :foreground "white"))
+                             (propertize " NORMAL " 'face '(:background "#0366d6" :foreground "white"))))
                          (when embr--muted-flag
                            (propertize " MUTED " 'face '(:background "red" :foreground "white")))
                          (when embr--incognito-flag
@@ -2247,6 +2268,188 @@ DESCRIPTION is shown in the prompt."
       (delete-process embr--process)))
   (embr--hover-stop)
   (embr--backend-shutdown))
+
+;; ── Vimium minor mode ──────────────────────────────────────────────
+
+(defvar-local embr-vimium--insert-mode nil
+  "Non-nil means vimium insert mode is active.")
+
+(transient-define-prefix embr-vimium-dispatch-keys ()
+  "Show vimium normal-mode bindings."
+  [["Motion"
+    ("j" "Down" embr-dispatch-close :transient nil)
+    ("k" "Up" embr-dispatch-close :transient nil)
+    ("h" "Left" embr-dispatch-close :transient nil)
+    ("l" "Right" embr-dispatch-close :transient nil)
+    ("0" "Line start" embr-dispatch-close :transient nil)
+    ("$" "Line end" embr-dispatch-close :transient nil)
+    ("w" "Word start" embr-dispatch-close :transient nil)
+    ("e" "Word end" embr-dispatch-close :transient nil)
+    ("b" "Word back" embr-dispatch-close :transient nil)]
+   ["Scroll / Page"
+    ("G" "Bottom of page" embr-dispatch-close :transient nil)
+    ("g" "Top of page (gg)" embr-dispatch-close :transient nil)
+    ("C-d" "Page down" embr-dispatch-close :transient nil)
+    ("C-u" "Page up" embr-dispatch-close :transient nil)]
+   ["Search"
+    ("/" "Search forward" embr-isearch-forward)
+    ("?" "Search backward" embr-isearch-backward)]
+   ["Actions"
+    ("f" "Hint link" embr-follow-hint)
+    ("o" "Open URL" embr-navigate)
+    ("y" "Copy URL (yy)" embr-copy-url)
+    ("r" "Reload" embr-refresh)
+    ("H" "Back" embr-back)
+    ("L" "Forward" embr-forward)
+    ("t" "New tab" embr-new-tab)
+    ("d" "Close tab" embr-close-tab)
+    ("J" "Next tab" embr-next-tab)
+    ("K" "Prev tab" embr-prev-tab)]
+   ["Mode"
+    ("i" "Insert mode" embr-vimium-enter-insert)
+    ("<escape>" "Normal mode" embr-vimium-enter-normal)
+    ("SPC" "Leader" embr-vimium-dispatch)]
+   ["Other"
+    ("x" "Delete" embr-dispatch-close :transient nil)
+    ("q" "Close menu" embr-dispatch-close)]])
+
+(transient-define-prefix embr-vimium-dispatch ()
+  "Show available embr browser commands (vimium leader)."
+  [["Navigation"
+    ("g" "Reload" embr-refresh)
+    ("l" "Back" embr-back)
+    ("r" "Forward" embr-forward)
+    ("h" "History" embr-history-persistent)
+    ("H" "Download history" embr-download-history)]
+   ["Tabs"
+    ("c" "New" embr-new-tab)
+    ("x" "Close" embr-close-tab)
+    ("]" "Next" embr-next-tab)
+    ("[" "Previous" embr-prev-tab)
+    ("s" "Switch" embr-list-tabs)
+    ("m" "Mute/unmute" embr-toggle-mute)]
+   ["Bookmarks"
+    ("b" "Add" bookmark-set)
+    ("j" "Jump" bookmark-jump)
+    ("u" "Unbookmark" bookmark-delete)]
+   ["Actions"
+    ("o" "Open URL" embr-navigate)
+    ("f" "Hint link" embr-follow-hint)
+    ("w" "Copy URL" embr-copy-url)
+    ("y" "Copy link" embr-copy-link)
+    ("d" "Download" embr-download)
+    ("D" "Download URL" embr-download-url)
+    (":" "Execute JS" embr-execute-js)]
+   ["Export"
+    ("i" "Print PDF" embr-print-pdf)
+    ("n" "Screenshot" embr-screenshot)
+    ("a" "Reader" embr-reader)
+    ("p" "Page info" embr-page-info)
+    ("v" "View text" embr-view-text)
+    ("e" "View source" embr-view-source)]
+   ["Privacy"
+    ("1" "Clear cookies" embr-clear-cookies)
+    ("2" "Clear cache" embr-clear-cache)
+    ("3" "Clear local storage" embr-clear-local-storage)
+    ("4" "Clear sessions" embr-clear-sessions)
+    ("5" "Clear URL history" embr-clear-url-history)
+    ("6" "Clear browser history" embr-clear-browser-history)
+    ("0" "Clear all (nuclear)" embr-clear-all)]
+   ["Other"
+    ("k" "Kill embr" embr-quit)
+    ("q" "Close menu" embr-dispatch-close)
+    ("<escape>" "Close menu" embr-dispatch-close)
+    ("z" "Chrome internals" embr-dispatch-chrome)
+    ("?" "Normal-mode bindkeys" embr-vimium-dispatch-keys)]])
+
+(defun embr-vimium--send-key (key)
+  "Send KEY name to the browser."
+  (embr--send `((cmd . "key") (key . ,key))
+              #'embr--action-callback))
+
+(defvar embr-vimium-normal-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "j") (lambda () (interactive) (embr-vimium--send-key "ArrowDown")))
+    (define-key map (kbd "k") (lambda () (interactive) (embr-vimium--send-key "ArrowUp")))
+    (define-key map (kbd "h") (lambda () (interactive) (embr-vimium--send-key "ArrowLeft")))
+    (define-key map (kbd "l") (lambda () (interactive) (embr-vimium--send-key "ArrowRight")))
+    (define-key map (kbd "0") (lambda () (interactive) (embr-vimium--send-key "Home")))
+    (define-key map (kbd "$") (lambda () (interactive) (embr-vimium--send-key "End")))
+    (define-key map (kbd "w") (lambda () (interactive) (embr-vimium--send-key "Control+ArrowRight")))
+    (define-key map (kbd "e") (lambda () (interactive) (embr-vimium--send-key "Control+ArrowRight")))
+    (define-key map (kbd "b") (lambda () (interactive) (embr-vimium--send-key "Control+ArrowLeft")))
+    (define-key map (kbd "x") (lambda () (interactive) (embr-vimium--send-key "Delete")))
+    (define-key map (kbd "G") (lambda () (interactive) (embr-vimium--send-key "End")))
+    (define-key map (kbd "C-d") (lambda () (interactive) (embr-vimium--send-key "PageDown")))
+    (define-key map (kbd "C-u") (lambda () (interactive) (embr-vimium--send-key "PageUp")))
+    (define-key map (kbd "/") #'embr-isearch-forward)
+    (define-key map (kbd "?") #'embr-isearch-backward)
+    (define-key map (kbd "f") #'embr-follow-hint)
+    (define-key map (kbd "H") #'embr-back)
+    (define-key map (kbd "L") #'embr-forward)
+    (define-key map (kbd "r") #'embr-refresh)
+    (define-key map (kbd "o") #'embr-navigate)
+    (define-key map (kbd "t") #'embr-new-tab)
+    (define-key map (kbd "d") #'embr-close-tab)
+    (define-key map (kbd "J") #'embr-next-tab)
+    (define-key map (kbd "K") #'embr-prev-tab)
+    (define-key map (kbd "i") #'embr-vimium-enter-insert)
+    (let ((g-map (make-sparse-keymap)))
+      (define-key g-map (kbd "g") (lambda () (interactive) (embr-vimium--send-key "Home")))
+      (define-key map (kbd "g") g-map))
+    (let ((y-map (make-sparse-keymap)))
+      (define-key y-map (kbd "y") #'embr-copy-url)
+      (define-key map (kbd "y") y-map))
+    ;; Swallow all unbound printable chars so they don't leak through.
+    (dolist (c (number-sequence 32 126))
+      (unless (lookup-key map (vector c))
+        (define-key map (vector c) #'ignore)))
+    map)
+  "Keymap for vimium normal mode.")
+
+;; Bind leader key separately so it picks up the user's customization.
+(define-key embr-vimium-normal-map (kbd embr-vimium-leader) #'embr-vimium-dispatch)
+
+(defvar embr-vimium-insert-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-g") #'embr-vimium-enter-normal)
+    (define-key map (kbd "<escape>") #'embr-vimium-enter-normal)
+    map)
+  "Keymap for vimium insert mode.")
+
+(defun embr-vimium-enter-insert ()
+  "Switch to vimium insert mode."
+  (interactive)
+  (setq embr-vimium--insert-mode t)
+  (setf (alist-get 'embr-vimium-mode minor-mode-overriding-map-alist)
+        embr-vimium-insert-map)
+  (force-mode-line-update))
+
+(defun embr-vimium-enter-normal ()
+  "Switch to vimium normal mode."
+  (interactive)
+  (setq embr-vimium--insert-mode nil)
+  (setf (alist-get 'embr-vimium-mode minor-mode-overriding-map-alist)
+        embr-vimium-normal-map)
+  (force-mode-line-update))
+
+(define-minor-mode embr-vimium-mode
+  "Toggle vimium-style modal keybindings for embr.
+In normal mode, bare keys act as vim-style navigation.
+In insert mode, keys pass through to the browser."
+  :lighter nil
+  (if embr-vimium-mode
+      (progn
+        (setq embr-vimium--insert-mode (not embr-vimium-start-in-normal))
+        (setf (alist-get 'embr-vimium-mode minor-mode-overriding-map-alist)
+              (if embr-vimium-start-in-normal
+                  embr-vimium-normal-map
+                embr-vimium-insert-map))
+        (force-mode-line-update))
+    (setq embr-vimium--insert-mode nil)
+    (setq minor-mode-overriding-map-alist
+          (assq-delete-all 'embr-vimium-mode minor-mode-overriding-map-alist))
+    (force-mode-line-update)))
 
 ;; ── Entry point ────────────────────────────────────────────────────
 
