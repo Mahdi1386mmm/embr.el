@@ -171,7 +171,8 @@ Pressing `C-c` opens a transient dispatch menu (like Magit) that shows all avail
 | `C-c g` | Reload |
 | `C-c l` | Back |
 | `C-c r` | Forward |
-| `C-c o` | Open URL or search (same as `C-l`) |
+| `C-c p` | Browse tab history |
+| `C-c o` | Open URL or search (same as `C-l`). `C-u` prefix clears URL history. |
 | `C-c h` | Follow link (Vimium-style hint labels) |
 | `C-c v` | View page text |
 | `C-c e` | View page source |
@@ -282,6 +283,16 @@ Use `C-c d` to download. Hover over a link so the status bar shows the URL, then
 
 Downloads go through Chromium's network stack, so session cookies and authentication are preserved. Protected/login-gated downloads work the same as in a normal browser.
 
+### Why is history (C-c p) only for the current tab?
+
+`C-c p` uses Chromium's CDP `Page.getNavigationHistory` API, which returns the back/forward history for the active tab. This is the only history API Chromium exposes through its DevTools protocol. Full cross-session browser history lives in a SQLite database on disk, but accessing it directly would bypass the browser engine and is outside the scope of the Playwright/CDP interface.
+
+### What is the difference between C-c p and C-c o history?
+
+`C-c p` (Past) shows the current tab's session history from Chromium via CDP. It resets when the tab closes.
+
+`C-c o` (Open URL) has its own URL history built from URLs you have typed or searched. This persists across embr sessions within the same Emacs process. To clear it, use `C-u C-c o` or `C-u M-x embr-navigate`.
+
 ### Does this work on macOS?
 
 Unknown. Let us know.
@@ -289,3 +300,7 @@ Unknown. Let us know.
 ### Windows?
 
 No.
+
+### Why not just use EXWM?
+
+EXWM is X11 only. There is also an experimental Wayland equivalent in the same spirit. embr takes a different approach: it does not turn Emacs into a window manager and works on any desktop environment, Wayland or Xorg. That said, this is just another option. Use whatever works for you.

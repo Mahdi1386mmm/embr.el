@@ -806,15 +806,32 @@ Dispatch to the active backend for display, then update metadata."
     (embr--search-url input)))
 
 (defun embr-navigate (url)
-  "Navigate to URL, or search if input doesn't look like a URL."
-  (interactive (list (completing-read "URL/Search: " embr--url-history nil nil nil
-                                      'embr--url-history)))
-  (let ((target (embr--maybe-search-url url)))
-    (push url embr--url-history)
-    (delete-dups embr--url-history)
-    (when target
-      (embr--send `((cmd . "navigate") (url . ,target))
-                         #'embr--action-callback))))
+  "Navigate to URL, or search if input doesn't look like a URL.
+With prefix argument, clear URL history."
+  (interactive
+   (if current-prefix-arg
+       (progn
+         (setq embr--url-history nil)
+         (message "embr: URL history cleared")
+         (list nil))
+     (list (completing-read "URL/Search: "
+                            (lambda (str pred action)
+                              (if (eq action 'metadata)
+                                  '(metadata (display-sort-function . identity))
+                                (complete-with-action
+                                 action embr--url-history str pred)))
+                            nil nil nil
+                            'embr--url-history))))
+  (if (or (null url) (string-empty-p url))
+      ;; Empty input navigates to about:blank.
+      (embr--send '((cmd . "navigate") (url . "about:blank"))
+                  #'embr--action-callback)
+    (let ((target (embr--maybe-search-url url)))
+      (push url embr--url-history)
+      (delete-dups embr--url-history)
+      (when target
+        (embr--send `((cmd . "navigate") (url . ,target))
+                     #'embr--action-callback)))))
 
 (defun embr-refresh ()
   "Refresh the current page."
@@ -833,6 +850,33 @@ Dispatch to the active backend for display, then update metadata."
   (interactive)
   (embr--send '((cmd . "forward"))
                      #'embr--action-callback))
+
+(defun embr-history ()
+  "Show browser history for the current tab and navigate to a selection."
+  (interactive)
+  (let* ((resp (embr--send-sync '((cmd . "history"))))
+         (entries (alist-get 'entries resp)))
+    (if (or (not entries) (null entries))
+        (message "embr: no history")
+      (let* ((candidates (mapcar (lambda (e)
+                                   (let ((title (alist-get 'title e))
+                                         (url (alist-get 'url e)))
+                                     (cons (if (string-empty-p title)
+                                               url
+                                             (format "%s  —  %s" title url))
+                                           url)))
+                                 entries))
+             (cands (mapcar #'car candidates))
+             (chosen (completing-read "History: "
+                                      (lambda (str pred action)
+                                        (if (eq action 'metadata)
+                                            '(metadata (display-sort-function . identity))
+                                          (complete-with-action action cands str pred)))
+                                      nil t)))
+        (when chosen
+          (let ((url (cdr (assoc chosen candidates))))
+            (embr--send `((cmd . "navigate") (url . ,url))
+                        #'embr--action-callback)))))))
 
 (defun embr-quit ()
   "Kill the daemon and close the buffer."
@@ -1469,7 +1513,7 @@ If the mouse is not over a link, fall back to hint selection."
     ("g" "Reload" embr-refresh)
     ("l" "Back" embr-back)
     ("r" "Forward" embr-forward)
-]
+    ("p" "Past" embr-history)]
    ["Tabs"
     ("c" "New" embr-new-tab)
     ("x" "Close" embr-close-tab)
