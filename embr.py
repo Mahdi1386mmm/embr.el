@@ -5,6 +5,7 @@ import asyncio
 import base64
 import json
 import os
+import shutil
 import struct
 import sys
 import tempfile
@@ -12,8 +13,13 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-FRAME_PATH = os.path.join(tempfile.gettempdir(), "embr-frame.jpg")
-PERF_LOG_PATH = os.path.join(tempfile.gettempdir(), "embr-perf.jsonl")
+_INCOGNITO = os.environ.get("EMBR_INCOGNITO") == "1"
+FRAME_PATH = os.path.join(
+    tempfile.gettempdir(),
+    "embr-incognito-frame.jpg" if _INCOGNITO else "embr-frame.jpg")
+PERF_LOG_PATH = os.path.join(
+    tempfile.gettempdir(),
+    "embr-incognito-perf.jsonl" if _INCOGNITO else "embr-perf.jsonl")
 SCRIPT_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path.home() / ".local" / "share" / "embr"
 BLOCKLIST_PATH = DATA_DIR / "blocklist.txt"
@@ -130,7 +136,13 @@ async def main():
     frame_seq = 0
 
     data_dir = Path.home() / ".local" / "share" / "embr"
-    user_data_dir = data_dir / "chromium-profile"
+    _incognito_tmpdir = None
+    if _INCOGNITO:
+        _incognito_tmpdir = tempfile.mkdtemp(prefix="embr-incognito-")
+        user_data_dir = Path(_incognito_tmpdir)
+        print(f"embr: incognito profile at {user_data_dir}", file=sys.stderr)
+    else:
+        user_data_dir = data_dir / "chromium-profile"
     user_data_dir.mkdir(parents=True, exist_ok=True)
 
     # uBlock Origin extension (downloaded by setup.sh --ublock).
@@ -533,6 +545,8 @@ async def main():
     # :hover), as fire-and-forget with cancel-and-replace so it can
     # never block anything.
     mouse_move_task = None
+    zoom_level = 1.0
+    muted = False
 
     _MOUSE_JS = """([type, x, y]) => {
         const el = document.elementFromPoint(x, y);
@@ -556,6 +570,7 @@ async def main():
         nonlocal context, page, running, loop_task, target_fps, jpeg_quality, cached_title
         nonlocal input_priority_window_s, frame_source, render_backend
         nonlocal adaptive_enabled, fps_min, fps_max, quality_min, quality_max
+        nonlocal zoom_level, muted
 
         if cmd == "init":
             # Validate frame_source and render_backend before any heavy work.
@@ -1087,6 +1102,137 @@ else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
                 return {"ok": True, "url": page.url, "title": cached_title}
             return {"error": f"tab index out of range: {idx}"}
 
+        if cmd == "zoom-in":
+            zoom_level = min(zoom_level + 0.1, 5.0)
+            await page.evaluate(f"document.body.style.zoom = '{zoom_level}'")
+            return {"ok": True, "zoom": round(zoom_level, 1)}
+
+        if cmd == "zoom-out":
+            zoom_level = max(zoom_level - 0.1, 0.3)
+            await page.evaluate(f"document.body.style.zoom = '{zoom_level}'")
+            return {"ok": True, "zoom": round(zoom_level, 1)}
+
+        if cmd == "zoom-reset":
+            zoom_level = 1.0
+            await page.evaluate("document.body.style.zoom = '1'")
+            return {"ok": True, "zoom": 1.0}
+
+        if cmd == "print-pdf":
+            if not _use_headless:
+                return {"error": "print-pdf requires headless mode (page.pdf() is a headless-only API)"}
+            directory = params.get("directory", str(Path.home()))
+            try:
+                title = await page.title() or "page"
+                # Sanitize filename.
+                safe = "".join(
+                    c if c.isalnum() or c in " -_." else "_" for c in title
+                ).strip()[:80] or "page"
+                filename = f"{safe}.pdf"
+                save_path = os.path.join(directory, filename)
+                base, ext = os.path.splitext(save_path)
+                counter = 1
+                while os.path.exists(save_path):
+                    save_path = f"{base}({counter}){ext}"
+                    counter += 1
+                pdf_bytes = await page.pdf()
+                with open(save_path, "wb") as f:
+                    f.write(pdf_bytes)
+                return {"ok": True, "path": save_path}
+            except Exception as e:
+                return {"error": f"print-pdf failed: {e}"}
+
+        if cmd == "screenshot":
+            path = params.get("path", "")
+            full_page = params.get("full_page", False)
+            try:
+                await page.screenshot(
+                    path=path, type="png", full_page=full_page)
+                return {"ok": True, "path": path}
+            except Exception as e:
+                return {"error": f"screenshot failed: {e}"}
+
+        if cmd == "toggle-mute":
+            muted = not muted
+            js = (
+                "document.querySelectorAll('video,audio')"
+                f".forEach(e => e.muted = {'true' if muted else 'false'})"
+            )
+            await page.evaluate(js)
+            return {"ok": True, "muted": muted}
+
+        if cmd == "reader":
+            try:
+                data = await page.evaluate("""() => {
+                    // Try <article>, then <main>, then largest text block.
+                    function getContent() {
+                        var article = document.querySelector('article');
+                        if (article) return article;
+                        var main = document.querySelector('main');
+                        if (main) return main;
+                        // Fallback: largest text-containing block.
+                        var blocks = document.querySelectorAll('div, section');
+                        var best = null, bestLen = 0;
+                        blocks.forEach(function(b) {
+                            var len = b.innerText ? b.innerText.length : 0;
+                            if (len > bestLen) { bestLen = len; best = b; }
+                        });
+                        return best || document.body;
+                    }
+                    var content = getContent();
+                    // Strip nav, header, footer, sidebar, ads.
+                    var clone = content.cloneNode(true);
+                    var remove = 'nav, header, footer, aside, [role="navigation"], [role="banner"], [role="contentinfo"], .sidebar, .ad, .ads, .advertisement';
+                    clone.querySelectorAll(remove).forEach(function(e) { e.remove(); });
+                    return {
+                        title: document.title || '',
+                        byline: (document.querySelector('meta[name="author"]') || {}).content || '',
+                        excerpt: (document.querySelector('meta[name="description"]') || {}).content || (clone.innerText || '').substring(0, 200),
+                        html: clone.innerHTML,
+                        text: clone.innerText || ''
+                    };
+                }""")
+                return {"ok": True, "reader": data}
+            except Exception as e:
+                return {"error": f"reader failed: {e}"}
+
+        if cmd == "page-info":
+            try:
+                info = await page.evaluate("""() => {
+                    return {
+                        url: window.location.href,
+                        title: document.title,
+                        protocol: window.location.protocol,
+                        domain: window.location.hostname,
+                        page_height: document.documentElement.scrollHeight,
+                        page_width: document.documentElement.scrollWidth,
+                        scripts: document.querySelectorAll('script').length,
+                        stylesheets: document.querySelectorAll('link[rel="stylesheet"]').length,
+                        images: document.querySelectorAll('img').length,
+                        iframes: document.querySelectorAll('iframe').length
+                    };
+                }""")
+                # Add cookie count from context.
+                cookies = await context.cookies()
+                domain = info.get("domain", "")
+                domain_cookies = [
+                    c for c in cookies
+                    if domain and c.get("domain", "").endswith(domain)]
+                info["cookies"] = len(domain_cookies)
+                # Content-Type via CDP resource tree.
+                content_type = ""
+                try:
+                    cdp = await page.context.new_cdp_session(page)
+                    tree = await cdp.send("Page.getResourceTree")
+                    content_type = tree["frameTree"]["frame"].get(
+                        "mimeType", "")
+                    await cdp.detach()
+                except Exception:
+                    pass
+                info["content_type"] = content_type
+                return {"ok": True, "info": info}
+            except Exception as e:
+                return {"error": f"page-info failed: {e}"}
+
         if cmd == "query-url":
             try:
                 url = await page.evaluate("() => window.location.href")
@@ -1117,6 +1263,13 @@ else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
                 os.unlink(FRAME_PATH)
             except OSError:
                 pass
+            # Clean up incognito temp profile.
+            if _INCOGNITO and _incognito_tmpdir:
+                try:
+                    shutil.rmtree(_incognito_tmpdir)
+                    print(f"embr: incognito profile wiped", file=sys.stderr)
+                except OSError:
+                    pass
             return None  # signals exit
 
         return {"error": f"unknown command: {cmd}"}

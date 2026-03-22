@@ -35,6 +35,7 @@
 
 (require 'cl-lib)
 (require 'image)
+(require 'shr)
 (require 'transient)
 
 ;; ── Customization ──────────────────────────────────────────────────
@@ -149,6 +150,7 @@ the native caret, so this defaults to nil."
 (defcustom embr-download-directory "~/Downloads/"
   "Directory where downloaded files are saved."
   :type 'directory)
+
 
 (defcustom embr-href-preview-hack t
   "Whether to inject a link preview overlay on hover.
@@ -364,8 +366,12 @@ Does not remove the Emacs package itself."
 
 ;; ── Internal state ─────────────────────────────────────────────────
 
+;; Per-buffer state — these become buffer-local in `embr-mode' so that
+;; multiple sessions (e.g. normal + incognito) each have their own daemon
+;; process, callback, URL, frame path, timers, etc.
 (defvar embr--process nil "The daemon subprocess.")
-(defvar embr--buffer nil "The display buffer.")
+(defvar embr--buffer nil "The display buffer (buffer-local; points to self).")
+(defvar embr--normal-buffer nil "Global pointer to the normal (non-incognito) embr buffer.")
 (defvar embr--response-buffer "" "Accumulator for partial JSON lines from the process.")
 (defvar embr--callback nil "Function to call with the next command response.")
 (defvar embr--current-url "" "The URL currently displayed.")
@@ -391,6 +397,9 @@ Does not remove the Emacs package itself."
 (defvar embr--canvas-error-count 0 "Consecutive canvas blit errors.")
 (defvar embr--canvas-frame-count 0 "Total frames blitted via canvas backend.")
 (defvar embr--default-frame-count 0 "Total frames rendered via default backend.")
+(defvar embr--zoom-level 1.0 "Current page zoom level.")
+(defvar embr--incognito-flag nil "Non-nil when this buffer is an incognito session.")
+(defvar embr--muted-flag nil "Non-nil when audio/video is muted.")
 
 ;; ── Process management ─────────────────────────────────────────────
 
@@ -425,56 +434,63 @@ Respects `embr-display-method' for display modes."
            :noquery t
            :stderr (get-buffer-create "*embr-stderr*")
            :filter #'embr--process-filter
-           :sentinel #'embr--process-sentinel))))
+           :sentinel #'embr--process-sentinel))
+    (process-put embr--process 'embr-buffer (current-buffer))))
 
-(defun embr--process-filter (_proc output)
-  "Handle OUTPUT from the daemon process."
-  (setq embr--response-buffer
-        (concat embr--response-buffer output))
-  ;; Process all complete lines.  For frame notifications, only render
-  ;; the latest one (skip intermediate frames if Emacs can't keep up).
-  (let (last-frame)
-    (while (string-match "\n" embr--response-buffer)
-      (let* ((pos (match-end 0))
-             (line (substring embr--response-buffer 0 (1- pos))))
-        (setq embr--response-buffer (substring embr--response-buffer pos))
-        (when (and line (not (string-empty-p line)))
-          (condition-case err
-              (let ((resp (json-parse-string line :object-type 'alist
-                                                  :array-type 'list
-                                                  :null-object nil
-                                                  :false-object :false)))
-                (cond
-                  ((alist-get 'frame resp)
-                   ;; Frame notification — just remember the latest one.
-                   (setq last-frame resp))
-                  ((alist-get 'metadata resp)
-                   ;; Navigation metadata — update URL/title immediately.
-                   (embr--update-metadata resp))
-                  ((alist-get 'screencast_error resp)
-                   ;; Screencast error notification — always show to user.
-                   (message "embr: %s" (alist-get 'screencast_error resp)))
-                  (t
-                   ;; Command response — dispatch to callback.
-                   (when embr--callback
-                     (let ((cb embr--callback))
-                       (setq embr--callback nil)
-                       (funcall cb resp))))))
-            (error (message "embr: JSON parse error: %s"
-                            (error-message-string err)))))))
-    ;; Stash the latest frame for the render timer instead of
-    ;; rendering synchronously — keeps Emacs responsive during
-    ;; high-FPS streams (e.g. video playback).
-    (when last-frame
-      (setq embr--pending-frame last-frame))))
+(defun embr--process-filter (proc output)
+  "Handle OUTPUT from daemon PROC, routing to the owning buffer."
+  (let ((buf (process-get proc 'embr-buffer)))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (setq embr--response-buffer
+              (concat embr--response-buffer output))
+        ;; Process all complete lines.  For frame notifications, only render
+        ;; the latest one (skip intermediate frames if Emacs can't keep up).
+        (let (last-frame)
+          (while (string-match "\n" embr--response-buffer)
+            (let* ((pos (match-end 0))
+                   (line (substring embr--response-buffer 0 (1- pos))))
+              (setq embr--response-buffer (substring embr--response-buffer pos))
+              (when (and line (not (string-empty-p line)))
+                (condition-case err
+                    (let ((resp (json-parse-string line :object-type 'alist
+                                                        :array-type 'list
+                                                        :null-object nil
+                                                        :false-object :false)))
+                      (cond
+                       ((alist-get 'frame resp)
+                        ;; Frame notification — just remember the latest one.
+                        (setq last-frame resp))
+                       ((alist-get 'metadata resp)
+                        ;; Navigation metadata — update URL/title immediately.
+                        (embr--update-metadata resp))
+                       ((alist-get 'screencast_error resp)
+                        ;; Screencast error notification — always show to user.
+                        (message "embr: %s" (alist-get 'screencast_error resp)))
+                       (t
+                        ;; Command response — dispatch to callback.
+                        (when embr--callback
+                          (let ((cb embr--callback))
+                            (setq embr--callback nil)
+                            (funcall cb resp))))))
+                  (error (message "embr: JSON parse error: %s"
+                                  (error-message-string err)))))))
+          ;; Stash the latest frame for the render timer instead of
+          ;; rendering synchronously — keeps Emacs responsive during
+          ;; high-FPS streams (e.g. video playback).
+          (when last-frame
+            (setq embr--pending-frame last-frame)))))))
 
-(defun embr--process-sentinel (_proc event)
-  "Handle process EVENT (e.g. exit)."
+(defun embr--process-sentinel (proc event)
+  "Handle process EVENT (e.g. exit) for PROC."
   (when (string-match-p "\\(finished\\|exited\\|killed\\)" event)
-    (message "embr: daemon exited: %s" (string-trim event))
-    (embr--hover-stop)
-    (embr--backend-shutdown)
-    (setq embr--process nil)))
+    (let ((buf (process-get proc 'embr-buffer)))
+      (message "embr: daemon exited: %s" (string-trim event))
+      (when (buffer-live-p buf)
+        (with-current-buffer buf
+          (embr--hover-stop)
+          (embr--backend-shutdown)
+          (setq embr--process nil))))))
 
 (defun embr--send (msg &optional callback)
   "Send MSG (an alist) to the daemon as JSON.  Call CALLBACK with the response."
@@ -589,10 +605,11 @@ SOCKET-PATH is the daemon frame socket (used by canvas backend)."
 
 (defun embr--backend-on-frame (resp)
   "Dispatch frame notification RESP to the active backend."
-  (if (string= embr--active-backend "default")
-      (embr--default-display-frame resp)
-    ;; Canvas: pixel data arrives via socket, nothing to do here.
-    nil))
+  (when embr--active-backend
+    (if (string= embr--active-backend "default")
+        (embr--default-display-frame resp)
+      ;; Canvas: pixel data arrives via socket, nothing to do here.
+      nil)))
 
 (defun embr--backend-shutdown ()
   "Shut down the active render backend."
@@ -605,19 +622,18 @@ SOCKET-PATH is the daemon frame socket (used by canvas backend)."
 (defun embr--default-display-frame (_resp)
   "Read JPEG from disk and display in buffer."
   (when (and embr--frame-path
-             (file-exists-p embr--frame-path)
-             (buffer-live-p embr--buffer))
-    (let ((data (with-temp-buffer
-                  (set-buffer-multibyte nil)
-                  (insert-file-contents-literally embr--frame-path)
-                  (buffer-string))))
-      (with-current-buffer embr--buffer
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (insert-image (create-image data 'jpeg t))
-          (remove-text-properties (point-min) (point-max) '(keymap nil))
-          (put-text-property (point-min) (point-max) 'pointer 'arrow)
-          (goto-char (point-min)))))
+             (file-exists-p embr--frame-path))
+    (let* ((path embr--frame-path)
+           (data (with-temp-buffer
+                   (set-buffer-multibyte nil)
+                   (insert-file-contents-literally path)
+                   (buffer-string))))
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert-image (create-image data 'jpeg t))
+        (remove-text-properties (point-min) (point-max) '(keymap nil))
+        (put-text-property (point-min) (point-max) 'pointer 'arrow)
+        (goto-char (point-min))))
     (cl-incf embr--default-frame-count)))
 
 ;; ── Canvas backend ────────────────────────────────────────────────
@@ -633,43 +649,48 @@ SOCKET-PATH is the daemon frame socket (used by canvas backend)."
   "Report canvas failure.  No automatic fallback."
   (message "embr: canvas backend failed — restart embr or check native module"))
 
-(defun embr--canvas-socket-filter (_proc data)
-  "Handle binary frame data from the canvas socket.
+(defun embr--canvas-socket-filter (proc data)
+  "Handle binary frame data from canvas socket PROC.
 Parse length-prefixed packets, drop stale/out-of-order frames,
-and blit the latest to the canvas."
-  (setq embr--canvas-recv-buf (concat embr--canvas-recv-buf data))
-  (let ((done nil))
-    (while (and (not done)
-                (>= (length embr--canvas-recv-buf) 16))
-      (let* ((hdr embr--canvas-recv-buf)
-             (seq (embr--read-u32 hdr 0))
-             (jpeg-len (embr--read-u32 hdr 12))
-             (total (+ 16 jpeg-len)))
-        (if (< (length embr--canvas-recv-buf) total)
-            (setq done t)
-          (let ((jpeg-data (substring embr--canvas-recv-buf 16 total))
-                (width (embr--read-u32 hdr 4))
-                (height (embr--read-u32 hdr 8)))
-            (setq embr--canvas-recv-buf
-                  (substring embr--canvas-recv-buf total))
-            ;; Drop stale or out-of-order packets.  Handle uint32
-            ;; wraparound: if delta is huge (> 2^31), seq wrapped.
-            (if (and (<= seq embr--canvas-last-seq)
-                     (< (- embr--canvas-last-seq seq) #x80000000))
-                (progn (cl-incf embr--canvas-stale-count) nil)
-              (setq embr--canvas-last-seq seq)
-              (when embr--canvas-image
-                (condition-case err
-                    (progn
-                      (embr-canvas-blit-jpeg
-                       embr--canvas-image jpeg-data width height seq)
-                      (cl-incf embr--canvas-frame-count)
-                      (setq embr--canvas-error-count 0))
-                  (error
-                   (cl-incf embr--canvas-error-count)
-                   (message "embr: canvas blit error %d: %s"
-                            embr--canvas-error-count
-                            (error-message-string err))))))))))))
+and blit the latest to the canvas.  Routes to the owning buffer
+via a process property so buffer-local vars resolve correctly."
+  (let ((buf (process-get proc 'embr-buffer)))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (setq embr--canvas-recv-buf (concat embr--canvas-recv-buf data))
+        (let ((done nil))
+          (while (and (not done)
+                      (>= (length embr--canvas-recv-buf) 16))
+            (let* ((hdr embr--canvas-recv-buf)
+                   (seq (embr--read-u32 hdr 0))
+                   (jpeg-len (embr--read-u32 hdr 12))
+                   (total (+ 16 jpeg-len)))
+              (if (< (length embr--canvas-recv-buf) total)
+                  (setq done t)
+                (let ((jpeg-data (substring embr--canvas-recv-buf 16 total))
+                      (width (embr--read-u32 hdr 4))
+                      (height (embr--read-u32 hdr 8)))
+                  (setq embr--canvas-recv-buf
+                        (substring embr--canvas-recv-buf total))
+                  ;; Drop stale or out-of-order packets.  Handle uint32
+                  ;; wraparound: if delta is huge (> 2^31), seq wrapped.
+                  (if (and (<= seq embr--canvas-last-seq)
+                           (< (- embr--canvas-last-seq seq) #x80000000))
+                      (progn (cl-incf embr--canvas-stale-count) nil)
+                    (setq embr--canvas-last-seq seq)
+                    (when embr--canvas-image
+                      (condition-case err
+                          (progn
+                            (embr-canvas-blit-jpeg
+                             embr--canvas-image jpeg-data width height seq)
+                            (cl-incf embr--canvas-frame-count)
+                            (setq embr--canvas-error-count 0))
+                        (error
+                         (cl-incf embr--canvas-error-count)
+                         (message "embr: canvas blit error %d: %s"
+                                  embr--canvas-error-count
+                                  (error-message-string err)))))))))))))))
+
 
 (defun embr--canvas-socket-sentinel (_proc event)
   "Handle canvas socket disconnect."
@@ -679,21 +700,21 @@ and blit the latest to the canvas."
 (defun embr--backend-init-canvas (socket-path)
   "Initialize the canvas render backend.
 Connect to SOCKET-PATH and create the canvas image in the buffer."
-  (setq embr--canvas-image
-        `(image :type canvas
-                :canvas-id embr-viewport-canvas
-                :canvas-width ,embr--viewport-width
-                :canvas-height ,embr--viewport-height))
+  (let ((canvas-id (intern (format "embr-canvas-%s" (buffer-name)))))
+    (setq embr--canvas-image
+          `(image :type canvas
+                  :canvas-id ,canvas-id
+                  :canvas-width ,embr--viewport-width
+                  :canvas-height ,embr--viewport-height)))
   (setq embr--canvas-recv-buf ""
         embr--canvas-error-count 0
         embr--canvas-last-seq 0
         embr--canvas-stale-count 0)
-  (with-current-buffer embr--buffer
-    (let ((inhibit-read-only t))
-      (erase-buffer)
-      (insert (propertize " " 'display embr--canvas-image))
-      (put-text-property (point-min) (point-max) 'pointer 'arrow)
-      (goto-char (point-min))))
+  (let ((inhibit-read-only t))
+    (erase-buffer)
+    (insert (propertize " " 'display embr--canvas-image))
+    (put-text-property (point-min) (point-max) 'pointer 'arrow)
+    (goto-char (point-min)))
   ;; Connect to the daemon's frame socket.
   (setq embr--canvas-socket
         (make-network-process
@@ -704,7 +725,8 @@ Connect to SOCKET-PATH and create the canvas image in the buffer."
          :coding '(binary . binary)
          :filter #'embr--canvas-socket-filter
          :sentinel #'embr--canvas-socket-sentinel
-         :noquery t)))
+         :noquery t))
+  (process-put embr--canvas-socket 'embr-buffer (current-buffer)))
 
 (defun embr--backend-shutdown-canvas ()
   "Shut down the canvas backend."
@@ -740,43 +762,43 @@ Dispatch to the active backend for display, then update metadata."
   (let ((url (or (alist-get 'url resp) ""))
         (frame-id (alist-get 'frame_id resp))
         (capture-mono (alist-get 'capture_done_mono_ms resp)))
-    (when (buffer-live-p embr--buffer)
-      ;; Backend-specific frame display.
-      (embr--backend-on-frame resp)
-      ;; Update URL from frame (title comes via metadata messages).
-      (unless (string= url embr--current-url)
-        (setq embr--current-url url)
-        (with-current-buffer embr--buffer
-          (force-mode-line-update)))
-      ;; Send render ack for perf logging.
-      (when (and embr-perf-log frame-id capture-mono
-                 embr--process (process-live-p embr--process))
-        (process-send-string
-         embr--process
-         (concat (json-serialize
-                  `((cmd . "frame_rendered")
-                    (frame_id . ,frame-id)
-                    (capture_done_mono_ms . ,capture-mono)))
-                 "\n"))))))
+    ;; Backend-specific frame display.
+    (embr--backend-on-frame resp)
+    ;; Update URL from frame (title comes via metadata messages).
+    (unless (string= url embr--current-url)
+      (setq embr--current-url url)
+      (force-mode-line-update))
+    ;; Send render ack for perf logging.
+    (when (and embr-perf-log frame-id capture-mono
+               embr--process (process-live-p embr--process))
+      (process-send-string
+       embr--process
+       (concat (json-serialize
+                `((cmd . "frame_rendered")
+                  (frame_id . ,frame-id)
+                  (capture_done_mono_ms . ,capture-mono)))
+               "\n")))))
 
 (defun embr--update-metadata (resp)
   "Update URL and title from command RESP if present."
   (let ((changed nil))
     (when-let* ((url (alist-get 'url resp)))
-      (unless (string= url embr--current-url)
-        (setq embr--current-url url
-              changed t)))
+      (when (stringp url)
+        (unless (string= url embr--current-url)
+          (setq embr--current-url url
+                changed t))))
     (when-let* ((title (alist-get 'title resp)))
-      (unless (string= title embr--current-title)
-        (setq embr--current-title title
-              changed t)))
-    (when (and changed (buffer-live-p embr--buffer))
-      (with-current-buffer embr--buffer
-        (rename-buffer (format "*embr: %s*"
-                               (if (string-empty-p embr--current-title)
-                                   embr--current-url embr--current-title))
-                       t)
-        (force-mode-line-update)))))
+      (when (stringp title)
+        (unless (string= title embr--current-title)
+          (setq embr--current-title title
+                changed t))))
+    (when changed
+      (rename-buffer (format "%s%s*"
+                             (if embr--incognito-flag "*embr incognito: " "*embr: ")
+                             (if (string-empty-p embr--current-title)
+                                 embr--current-url embr--current-title))
+                     t)
+      (force-mode-line-update))))
 
 (defun embr--action-callback (resp)
   "Generic callback for command responses: report errors, update metadata."
@@ -814,20 +836,23 @@ With prefix argument, clear URL history."
          (message "embr: URL history cleared")
          (list nil))
      (list (completing-read "URL/Search: "
-                            (lambda (str pred action)
-                              (if (eq action 'metadata)
-                                  '(metadata (display-sort-function . identity))
-                                (complete-with-action
-                                 action embr--url-history str pred)))
+                            (unless embr--incognito-flag
+                              (lambda (str pred action)
+                                (if (eq action 'metadata)
+                                    '(metadata (display-sort-function . identity))
+                                  (complete-with-action
+                                   action embr--url-history str pred))))
                             nil nil nil
-                            'embr--url-history))))
+                            (unless embr--incognito-flag
+                              'embr--url-history)))))
   (if (or (null url) (string-empty-p url))
       ;; Empty input navigates to about:blank.
       (embr--send '((cmd . "navigate") (url . "about:blank"))
                   #'embr--action-callback)
     (let ((target (embr--maybe-search-url url)))
-      (push url embr--url-history)
-      (delete-dups embr--url-history)
+      (unless embr--incognito-flag
+        (push url embr--url-history)
+        (delete-dups embr--url-history))
       (when target
         (embr--send `((cmd . "navigate") (url . ,target))
                      #'embr--action-callback)))))
@@ -907,14 +932,13 @@ Reads the History SQLite database directly.  Requires sqlite3 on PATH."
   (when (and embr--process (process-live-p embr--process))
     (embr--send '((cmd . "quit")))
     (sit-for 0.5)
-    (when (process-live-p embr--process)
+    (when (and embr--process (process-live-p embr--process))
       (delete-process embr--process)))
   (embr--hover-stop)
   (embr--backend-shutdown)
   (setq embr--process nil
         embr--frame-path nil)
-  (when (buffer-live-p embr--buffer)
-    (kill-buffer embr--buffer)))
+  (kill-buffer (current-buffer)))
 
 (defun embr-mouse-handler (event)
   "Handle mouse press, track drag, and forward to browser.
@@ -1024,52 +1048,55 @@ Better compatibility with iframe widgets like Cloudflare Turnstile."
 
 ;; ── Hover tracking ────────────────────────────────────────────────
 
-(defun embr--hover-tick ()
-  "Send mouse position to the browser if it changed.  Runs on a timer."
-  (when (and embr--process (process-live-p embr--process)
-             (buffer-live-p embr--buffer)
-             (eq (current-buffer) embr--buffer))
-    (let* ((pos (mouse-pixel-position))
-           (frame (car pos))
-           (px (cadr pos))
-           (py (cddr pos)))
-      (when (and frame px py (eq frame (selected-frame)))
-        ;; Convert frame pixel position to image coordinates.
-        (let* ((win (get-buffer-window embr--buffer))
-               (edges (and win (window-inside-pixel-edges win)))
-               (img-x (and edges (- px (nth 0 edges))))
-               (img-y (and edges (- py (nth 1 edges)))))
-          ;; Clamp to viewport bounds — out-of-bounds coords confuse Playwright.
-          (when img-x
-            (setq img-x (max 0 (min img-x (1- (or embr--viewport-width embr-default-width))))))
-          (when img-y
-            (setq img-y (max 0 (min img-y (1- (or embr--viewport-height embr-default-height))))))
-          ;; Distance threshold: filter sub-pixel jitter.
-          (let* ((dx (- img-x (or embr--hover-last-x img-x)))
-                 (dy (- img-y (or embr--hover-last-y img-y)))
-                 (dist (sqrt (+ (* dx dx) (* dy dy))))
-                 ;; Rate self-throttle: use min rate under pressure.
-                 (rate (if embr--pressure embr-hover-rate-min embr-hover-rate))
-                 (min-interval (/ 1.0 rate))
-                 (now (float-time)))
-            (when (and img-x img-y
-                       (>= dist embr-hover-move-threshold-px)
-                       (or (null embr--hover-last-send-time)
-                           (>= (- now embr--hover-last-send-time) min-interval)))
-              (setq embr--hover-last-x img-x
-                    embr--hover-last-y img-y
-                    embr--hover-last-send-time now)
-              ;; Write directly to process — don't touch embr--callback.
-              ;; Using embr--send here would clobber any pending command callback.
-              (process-send-string
-               embr--process
-               (concat (json-serialize `((cmd . "mousemove") (x . ,img-x) (y . ,img-y))) "\n")))))))))
+(defun embr--hover-tick (buf)
+  "Send mouse position to the browser if it changed.
+BUF is the embr buffer that owns this timer."
+  (when (and (buffer-live-p buf) (eq (current-buffer) buf))
+    (with-current-buffer buf
+      (when (and embr--process (process-live-p embr--process))
+        (let* ((pos (mouse-pixel-position))
+               (frame (car pos))
+               (px (cadr pos))
+               (py (cddr pos)))
+          (when (and frame px py (eq frame (selected-frame)))
+            ;; Convert frame pixel position to image coordinates.
+            (let* ((win (get-buffer-window buf))
+                   (edges (and win (window-inside-pixel-edges win)))
+                   (img-x (and edges (- px (nth 0 edges))))
+                   (img-y (and edges (- py (nth 1 edges)))))
+              ;; Clamp to viewport bounds — out-of-bounds coords confuse Playwright.
+              (when img-x
+                (setq img-x (max 0 (min img-x (1- (or embr--viewport-width embr-default-width))))))
+              (when img-y
+                (setq img-y (max 0 (min img-y (1- (or embr--viewport-height embr-default-height))))))
+              ;; Distance threshold: filter sub-pixel jitter.
+              (let* ((dx (- img-x (or embr--hover-last-x img-x)))
+                     (dy (- img-y (or embr--hover-last-y img-y)))
+                     (dist (sqrt (+ (* dx dx) (* dy dy))))
+                     ;; Rate self-throttle: use min rate under pressure.
+                     (rate (if embr--pressure embr-hover-rate-min embr-hover-rate))
+                     (min-interval (/ 1.0 rate))
+                     (now (float-time)))
+                (when (and img-x img-y
+                           (>= dist embr-hover-move-threshold-px)
+                           (or (null embr--hover-last-send-time)
+                               (>= (- now embr--hover-last-send-time) min-interval)))
+                  (setq embr--hover-last-x img-x
+                        embr--hover-last-y img-y
+                        embr--hover-last-send-time now)
+                  ;; Write directly to process — don't touch embr--callback.
+                  (process-send-string
+                   embr--process
+                   (concat (json-serialize `((cmd . "mousemove") (x . ,img-x) (y . ,img-y))) "\n")))))))))))
 
 
 (defun embr--hover-start ()
   "Start the hover tracking timer."
   (embr--hover-stop)
-  (setq embr--hover-timer (run-at-time 0 (/ 1.0 embr-hover-rate) #'embr--hover-tick)))
+  (let ((buf (current-buffer)))
+    (setq embr--hover-timer
+          (run-at-time 0 (/ 1.0 embr-hover-rate)
+                       (lambda () (embr--hover-tick buf))))))
 
 (defun embr--hover-stop ()
   "Stop the hover tracking timer."
@@ -1084,18 +1111,23 @@ Better compatibility with iframe widgets like Cloudflare Turnstile."
 
 ;; ── Render timer ──────────────────────────────────────────────────
 
-(defun embr--render-tick ()
-  "Render the latest pending frame, if any.  Runs on a timer."
-  (when embr--pending-frame
-    (let ((frame embr--pending-frame))
-      (setq embr--pending-frame nil)
-      (embr--handle-frame frame))))
+(defun embr--render-tick (buf)
+  "Render the latest pending frame, if any.
+BUF is the embr buffer that owns this timer."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (when embr--pending-frame
+        (let ((frame embr--pending-frame))
+          (setq embr--pending-frame nil)
+          (embr--handle-frame frame))))))
 
 (defun embr--render-start ()
   "Start the frame render timer at `embr-fps' Hz."
   (embr--render-stop)
-  (setq embr--render-timer
-        (run-at-time 0 (/ 1.0 embr-fps) #'embr--render-tick)))
+  (let ((buf (current-buffer)))
+    (setq embr--render-timer
+          (run-at-time 0 (/ 1.0 embr-fps)
+                       (lambda () (embr--render-tick buf))))))
 
 (defun embr--render-stop ()
   "Stop the frame render timer."
@@ -1187,7 +1219,7 @@ Better compatibility with iframe widgets like Cloudflare Turnstile."
          (px (cadr pos))
          (py (cddr pos)))
     (when (and frame px py (eq frame (selected-frame)))
-      (let* ((win (get-buffer-window embr--buffer))
+      (let* ((win (get-buffer-window (current-buffer)))
              (edges (and win (window-inside-pixel-edges win))))
         (when edges
           (cons (max 0 (min (- px (nth 0 edges))
@@ -1335,8 +1367,10 @@ If the mouse is not over a link, fall back to hint selection."
 
 (defun embr-new-tab (url)
   "Open URL in a new tab, or search if input doesn't look like a URL."
-  (interactive (list (completing-read "URL/Search for new tab: " embr--url-history nil nil nil
-                                      'embr--url-history)))
+  (interactive (list (completing-read "URL/Search for new tab: "
+                                      (unless embr--incognito-flag embr--url-history)
+                                      nil nil nil
+                                      (unless embr--incognito-flag 'embr--url-history))))
   (let ((target (embr--maybe-search-url url)))
     (embr--send `((cmd . "new-tab") (url . ,target))
                        #'embr--action-callback)))
@@ -1448,6 +1482,276 @@ If the mouse is not over a link, fall back to hint selection."
          #'embr--action-callback)
       (message "embr: kill ring empty"))))
 
+;; ── Zoom ──────────────────────────────────────────────────────────
+
+(defun embr-zoom-in ()
+  "Zoom in the browser page."
+  (interactive)
+  (embr--send '((cmd . "zoom-in"))
+              (lambda (resp)
+                (if-let* ((err (alist-get 'error resp)))
+                    (message "embr: %s" err)
+                  (setq embr--zoom-level (alist-get 'zoom resp))
+                  (force-mode-line-update)
+                  (message "Zoom: %d%%" (round (* embr--zoom-level 100)))))))
+
+(defun embr-zoom-out ()
+  "Zoom out the browser page."
+  (interactive)
+  (embr--send '((cmd . "zoom-out"))
+              (lambda (resp)
+                (if-let* ((err (alist-get 'error resp)))
+                    (message "embr: %s" err)
+                  (setq embr--zoom-level (alist-get 'zoom resp))
+                  (force-mode-line-update)
+                  (message "Zoom: %d%%" (round (* embr--zoom-level 100)))))))
+
+(defun embr-zoom-reset ()
+  "Reset browser page zoom to 100%."
+  (interactive)
+  (embr--send '((cmd . "zoom-reset"))
+              (lambda (resp)
+                (if-let* ((err (alist-get 'error resp)))
+                    (message "embr: %s" err)
+                  (setq embr--zoom-level 1.0)
+                  (force-mode-line-update)
+                  (message "Zoom: reset")))))
+
+;; ── Copy link ────────────────────────────────────────────────────
+
+(defun embr-copy-link ()
+  "Copy the link under the mouse cursor to the kill ring.
+If the mouse is not over a link, fall back to hint selection."
+  (interactive)
+  (let ((coords (embr--mouse-image-coords)))
+    (if (null coords)
+        (embr--copy-link-via-hints)
+      (embr--send `((cmd . "link-at-point")
+                    (x . ,(car coords))
+                    (y . ,(cdr coords)))
+                  (lambda (resp)
+                    (let ((href (alist-get 'href resp)))
+                      (if href
+                          (progn
+                            (kill-new href)
+                            (message "Copied: %s" href))
+                        (embr--copy-link-via-hints))))))))
+
+(defun embr--copy-link-via-hints ()
+  "Show link hints, then copy the chosen link to the kill ring."
+  (embr--send '((cmd . "hints"))
+              (lambda (resp)
+                (if-let* ((err (alist-get 'error resp)))
+                    (message "embr error: %s" err)
+                  (let* ((hints (alist-get 'hints resp)))
+                    (if (null hints)
+                        (message "embr: no links found")
+                      (setq embr--hints hints)
+                      (run-at-time 0.1 nil #'embr--read-copy-link-hint)))))))
+
+(defun embr--read-copy-link-hint ()
+  "Read a hint tag from the user and copy its link."
+  (let* ((descriptions (mapcar (lambda (h)
+                                 (format "%s: %s" (alist-get 'tag h)
+                                         (alist-get 'text h)))
+                               embr--hints))
+         (chosen (condition-case nil
+                     (completing-read "Copy link hint: " descriptions nil t)
+                   (quit nil))))
+    (embr--send '((cmd . "hints-clear")) nil)
+    (when (and chosen (string-match "\\`\\([^:]+\\):" chosen))
+      (let* ((tag (match-string 1 chosen))
+             (hint (seq-find (lambda (h) (string= (alist-get 'tag h) tag))
+                             embr--hints)))
+        (when hint
+          (let ((href (alist-get 'href hint)))
+            (if href
+                (progn
+                  (kill-new href)
+                  (message "Copied: %s" href))
+              (message "embr: selected element is not a link"))))))))
+
+;; ── Print to PDF ─────────────────────────────────────────────────
+
+(defun embr-print-pdf ()
+  "Save the current page as a PDF file."
+  (interactive)
+  (let ((dir (read-directory-name "Save PDF to: "
+                                  (expand-file-name embr-download-directory))))
+    (embr--send `((cmd . "print-pdf")
+                  (directory . ,(expand-file-name dir)))
+                (lambda (resp)
+                  (if-let* ((err (alist-get 'error resp)))
+                      (message "embr: %s" err)
+                    (message "Saved: %s" (alist-get 'path resp)))))))
+
+;; ── Page screenshot ──────────────────────────────────────────────
+
+(defun embr-screenshot ()
+  "Save a full-resolution screenshot of the current page."
+  (interactive)
+  (let* ((default-name (format "embr-%s-%s.png"
+                               (replace-regexp-in-string
+                                "[^a-zA-Z0-9_-]" "_"
+                                (or embr--current-title "page"))
+                               (format-time-string "%Y%m%d-%H%M%S")))
+         (path (read-file-name "Save screenshot: "
+                               (expand-file-name embr-download-directory)
+                               nil nil default-name)))
+    (embr--send `((cmd . "screenshot")
+                  (path . ,(expand-file-name path)))
+                (lambda (resp)
+                  (if-let* ((err (alist-get 'error resp)))
+                      (message "embr: %s" err)
+                    (message "Saved: %s" (alist-get 'path resp)))))))
+
+;; ── Mute/unmute ──────────────────────────────────────────────────
+
+(defun embr-toggle-mute ()
+  "Toggle mute on all audio and video elements."
+  (interactive)
+  (embr--send '((cmd . "toggle-mute"))
+              (lambda (resp)
+                (if-let* ((err (alist-get 'error resp)))
+                    (message "embr: %s" err)
+                  (setq embr--muted-flag (eq (alist-get 'muted resp) t))
+                  (force-mode-line-update)
+                  (message "embr: %s"
+                           (if embr--muted-flag "muted" "unmuted"))))))
+
+;; ── Reader mode ──────────────────────────────────────────────────
+
+(defun embr-reader ()
+  "Extract article content and display in a readable buffer."
+  (interactive)
+  (embr--send '((cmd . "reader"))
+              (lambda (resp)
+                (if-let* ((err (alist-get 'error resp)))
+                    (message "embr: %s" err)
+                  (let* ((data (alist-get 'reader resp))
+                         (title (alist-get 'title data))
+                         (byline (alist-get 'byline data))
+                         (excerpt (alist-get 'excerpt data))
+                         (html (alist-get 'html data))
+                         (buf (get-buffer-create "*embr-reader*")))
+                    (with-current-buffer buf
+                      (let ((inhibit-read-only t))
+                        (erase-buffer)
+                        (when (and title (not (string-empty-p title)))
+                          (insert (propertize title 'face 'bold) "\n"))
+                        (when (and byline (not (string-empty-p byline)))
+                          (insert (propertize byline 'face 'italic) "\n"))
+                        (when (and excerpt (not (string-empty-p excerpt)))
+                          (insert (propertize excerpt 'face 'shadow) "\n"))
+                        (when (or title byline excerpt)
+                          (insert "\n"))
+                        (let ((start (point)))
+                          (insert html)
+                          (shr-render-region start (point-max))))
+                      (goto-char (point-min))
+                      (view-mode 1))
+                    (display-buffer buf))))))
+
+;; ── Page info ────────────────────────────────────────────────────
+
+(defun embr-page-info ()
+  "Display information about the current page."
+  (interactive)
+  (embr--send '((cmd . "page-info"))
+              (lambda (resp)
+                (if-let* ((err (alist-get 'error resp)))
+                    (message "embr: %s" err)
+                  (let* ((info (alist-get 'info resp))
+                         (buf (get-buffer-create "*embr-page-info*")))
+                    (with-current-buffer buf
+                      (let ((inhibit-read-only t))
+                        (erase-buffer)
+                        (insert (format "%-15s %s\n" "URL:" (alist-get 'url info)))
+                        (insert (format "%-15s %s\n" "Title:" (alist-get 'title info)))
+                        (insert (format "%-15s %s\n" "Protocol:" (alist-get 'protocol info)))
+                        (insert (format "%-15s %s\n" "Domain:" (alist-get 'domain info)))
+                        (insert (format "%-15s %s\n" "Cookies:" (alist-get 'cookies info)))
+                        (insert (format "%-15s %sx%s\n" "Page size:"
+                                        (alist-get 'page_width info)
+                                        (alist-get 'page_height info)))
+                        (insert (format "%-15s %s\n" "Scripts:" (alist-get 'scripts info)))
+                        (insert (format "%-15s %s\n" "Stylesheets:" (alist-get 'stylesheets info)))
+                        (insert (format "%-15s %s\n" "Images:" (alist-get 'images info)))
+                        (insert (format "%-15s %s\n" "Iframes:" (alist-get 'iframes info)))
+                        (insert (format "%-15s %s\n" "Content-Type:" (or (alist-get 'content_type info) ""))))
+                      (goto-char (point-min))
+                      (special-mode))
+                    (display-buffer buf))))))
+
+;; ── Incognito mode ───────────────────────────────────────────────
+;;
+;; Uses the same `embr-mode' with buffer-local state.  The only
+;; difference is the EMBR_INCOGNITO=1 env var (temp profile on the
+;; Python side) and the `embr--incognito-flag' for header line display.
+
+(defvar embr--incognito-buffer nil "The incognito display buffer.")
+
+;;;###autoload
+(defun embr-browse-incognito (url)
+  "Launch an incognito embr session and navigate to URL."
+  (interactive "sURL: ")
+  (when (embr--setup-needed-p)
+    (error "embr: Run M-x embr-setup-or-update-all first"))
+  ;; Create buffer.
+  (unless (buffer-live-p embr--incognito-buffer)
+    (setq embr--incognito-buffer (generate-new-buffer "*embr incognito*"))
+    (with-current-buffer embr--incognito-buffer
+      (embr-mode)
+      (setq embr--incognito-flag t)))
+  (with-current-buffer embr--incognito-buffer
+    ;; Start daemon.
+    (unless (and embr--process (process-live-p embr--process))
+      (setq embr--viewport-width (or embr--viewport-width embr-default-width)
+            embr--viewport-height (or embr--viewport-height embr-default-height))
+      (let* ((inner (list embr-python embr-script))
+             (xvfb (and (eq embr-display-method 'headed-offscreen)
+                        (executable-find "xvfb-run")))
+             (command
+              (if xvfb
+                  (append (list xvfb "--auto-servernum"
+                                "--server-args=-screen 0 1920x1080x24")
+                          inner)
+                inner))
+             (process-environment
+              (cons "EMBR_INCOGNITO=1"
+                    (cons (format "EMBR_DISPLAY=%s"
+                                  (if xvfb "headed-offscreen"
+                                    (symbol-name embr-display-method)))
+                          process-environment))))
+        (setq embr--process
+              (make-process
+               :name "embr-incognito"
+               :command command
+               :connection-type 'pipe
+               :noquery t
+               :stderr (get-buffer-create "*embr-incognito-stderr*")
+               :filter #'embr--process-filter
+               :sentinel #'embr--process-sentinel))
+        (process-put embr--process 'embr-buffer embr--incognito-buffer))
+      (let ((resp (embr--send-sync (embr--build-init-params))))
+        (if (alist-get 'error resp)
+            (progn
+              (when (and embr--process (process-live-p embr--process))
+                (delete-process embr--process))
+              (setq embr--process nil)
+              (error "embr incognito: init failed: %s" (alist-get 'error resp)))
+          (setq embr--frame-path (alist-get 'frame_path resp))
+          (embr--hover-start)
+          (embr--backend-init
+           (or (alist-get 'render_backend resp) "default")
+           (alist-get 'frame_socket_path resp))
+          (message "embr incognito: %s transport, %s backend"
+                   (or (alist-get 'frame_source resp) "unknown")
+                   (embr--backend-name))))))
+  ;; Show buffer and navigate.
+  (switch-to-buffer embr--incognito-buffer)
+  (embr-navigate url))
+
 ;; ── Key forwarding ─────────────────────────────────────────────────
 
 (defun embr--translate-key (key)
@@ -1513,6 +1817,10 @@ If the mouse is not over a link, fall back to hint selection."
    ["Scroll / Page"
     ("C-v" "Page down" embr-self-insert :transient nil)
     ("M-v" "Page up" embr-self-insert :transient nil)]
+   ["Zoom"
+    ("C-=" "Zoom in" embr-zoom-in)
+    ("C--" "Zoom out" embr-zoom-out)
+    ("C-0" "Reset zoom" embr-zoom-reset)]
    ["Clipboard"
     ("M-w" "Copy" embr-copy)
     ("C-y" "Paste" embr-paste)]
@@ -1625,7 +1933,8 @@ DESCRIPTION is shown in the prompt."
     ("x" "Close" embr-close-tab)
     ("]" "Next" embr-next-tab)
     ("[" "Previous" embr-prev-tab)
-    ("s" "Switch" embr-list-tabs)]
+    ("s" "Switch" embr-list-tabs)
+    ("m" "Mute/unmute" embr-toggle-mute)]
    ["Bookmarks"
     ("b" "Add" bookmark-set)
     ("j" "Jump" bookmark-jump)
@@ -1634,7 +1943,12 @@ DESCRIPTION is shown in the prompt."
     ("o" "Open URL" embr-navigate)
     ("f" "Hint link" embr-follow-hint)
     ("w" "Copy URL" embr-copy-url)
+    ("y" "Copy link" embr-copy-link)
     ("d" "Download" embr-download)
+    ("i" "Print PDF" embr-print-pdf)
+    ("n" "Screenshot" embr-screenshot)
+    ("a" "Reader" embr-reader)
+    ("p" "Page info" embr-page-info)
     ("v" "View text" embr-view-text)
     ("e" "View source" embr-view-source)
     (":" "Execute JS" embr-execute-js)]
@@ -1686,6 +2000,11 @@ DESCRIPTION is shown in the prompt."
     (define-key map (kbd "C-s") #'embr-isearch-forward)
     (define-key map (kbd "C-r") #'embr-isearch-backward)
 
+    ;; Zoom bindings.
+    (define-key map (kbd "C-=") #'embr-zoom-in)
+    (define-key map (kbd "C--") #'embr-zoom-out)
+    (define-key map (kbd "C-0") #'embr-zoom-reset)
+
     ;; Mouse → forward to browser.
     (define-key map [down-mouse-1] #'embr-mouse-handler)
 
@@ -1701,6 +2020,37 @@ DESCRIPTION is shown in the prompt."
 (define-derived-mode embr-mode nil "embr"
   "Major mode for the embr browser buffer."
   :group 'embr
+  ;; Make per-session state buffer-local so multiple instances
+  ;; (e.g. normal + incognito) each have their own daemon.
+  (setq-local embr--process nil)
+  (setq-local embr--buffer (current-buffer))
+  (setq-local embr--response-buffer "")
+  (setq-local embr--callback nil)
+  (setq-local embr--current-url "")
+  (setq-local embr--current-title "")
+  (setq-local embr--viewport-width nil)
+  (setq-local embr--viewport-height nil)
+  (setq-local embr--frame-path nil)
+  (setq-local embr--hints nil)
+  (setq-local embr--hover-timer nil)
+  (setq-local embr--hover-last-x nil)
+  (setq-local embr--hover-last-y nil)
+  (setq-local embr--hover-last-send-time nil)
+  (setq-local embr--pending-frame nil)
+  (setq-local embr--render-timer nil)
+  (setq-local embr--pressure nil)
+  (setq-local embr--active-backend nil)
+  (setq-local embr--canvas-image nil)
+  (setq-local embr--canvas-socket nil)
+  (setq-local embr--canvas-recv-buf "")
+  (setq-local embr--canvas-last-seq 0)
+  (setq-local embr--canvas-stale-count 0)
+  (setq-local embr--canvas-error-count 0)
+  (setq-local embr--canvas-frame-count 0)
+  (setq-local embr--default-frame-count 0)
+  (setq-local embr--zoom-level 1.0)
+  (setq-local embr--incognito-flag nil)
+  (setq-local embr--muted-flag nil)
   (setq-local buffer-read-only t)
   (setq-local cursor-type nil)
   (setq-local void-text-area-pointer 'arrow)
@@ -1711,16 +2061,60 @@ DESCRIPTION is shown in the prompt."
                                      (concat (substring embr--current-url 0 40) "...")
                                    embr--current-url)))
                         (concat
+                         (when embr--muted-flag
+                           (propertize " MUTED " 'face '(:background "red" :foreground "white")))
+                         (when embr--incognito-flag
+                           (propertize " INCOGNITO " 'face '(:background "purple" :foreground "white")))
                          " "
                          (if (string-empty-p embr--current-title)
                              (propertize url 'face 'shadow)
                            (concat
                             (propertize url 'face 'shadow)
                             (propertize " — " 'face 'shadow)
-                            (propertize embr--current-title 'face 'bold)))))))
-  (add-hook 'pre-command-hook #'embr--maybe-end-search nil t))
+                            (propertize embr--current-title 'face 'bold)))
+                         (unless (= embr--zoom-level 1.0)
+                           (format " [%d%%]" (round (* embr--zoom-level 100))))))))
+  (add-hook 'pre-command-hook #'embr--maybe-end-search nil t)
+  (add-hook 'kill-buffer-hook #'embr--kill-buffer-cleanup nil t))
+
+(defun embr--kill-buffer-cleanup ()
+  "Shut down the daemon when the buffer is killed by any means."
+  (when (and embr--process (process-live-p embr--process))
+    (process-send-string
+     embr--process
+     (concat (json-serialize '((cmd . "quit"))) "\n"))
+    (sit-for 0.3)
+    (when (and embr--process (process-live-p embr--process))
+      (delete-process embr--process)))
+  (embr--hover-stop)
+  (embr--backend-shutdown))
 
 ;; ── Entry point ────────────────────────────────────────────────────
+
+(defun embr--build-init-params ()
+  "Build the init command params alist from current defcustom values."
+  `((cmd . "init")
+    (width . ,embr--viewport-width)
+    (height . ,embr--viewport-height)
+    (screen_width . ,embr-screen-width)
+    (screen_height . ,embr-screen-height)
+    (fps . ,embr-fps)
+    (jpeg_quality . ,embr-jpeg-quality)
+    ,@(when embr-color-scheme
+        `((color_scheme . ,(symbol-name embr-color-scheme))))
+    ,@(when embr-dom-caret-hack
+        '((dom_caret . t)))
+    ,@(when embr-href-preview-hack
+        '((href_preview . t)))
+    ,@(when embr-perf-log
+        '((perf_log . t)))
+    (frame_source . ,(symbol-name embr-frame-source))
+    (render_backend . ,(embr--select-backend))
+    (input_priority_window_ms . ,embr-input-priority-window-ms)
+    ,@(when embr-adaptive-capture
+        `((adaptive_capture . t)
+          (adaptive_fps_min . ,embr-adaptive-fps-min)
+          (adaptive_jpeg_quality_min . ,embr-adaptive-jpeg-quality-min)))))
 
 ;;;###autoload
 (defun embr-browse (url &optional _new-window)
@@ -1735,56 +2129,34 @@ If the daemon is already running, just navigate to the new URL."
           (error "embr: Setup started in *embr-setup* buffer. Run M-x embr-browse again when it finishes"))
       (error "embr: Run M-x embr-setup-or-update-all first")))
   ;; Create buffer if needed.
-  (unless (buffer-live-p embr--buffer)
-    (setq embr--buffer (generate-new-buffer "*embr*"))
-    (with-current-buffer embr--buffer
+  (unless (buffer-live-p embr--normal-buffer)
+    (setq embr--normal-buffer (generate-new-buffer "*embr*"))
+    (with-current-buffer embr--normal-buffer
       (embr-mode)))
-  ;; Start daemon if needed.
-  (unless (and embr--process (process-live-p embr--process))
-    (setq embr--viewport-width (or embr--viewport-width embr-default-width)
-          embr--viewport-height (or embr--viewport-height embr-default-height))
-    (embr--start-daemon)
-    (let ((resp (embr--send-sync
-                 `((cmd . "init")
-                   (width . ,embr--viewport-width)
-                   (height . ,embr--viewport-height)
-                   (screen_width . ,embr-screen-width)
-                   (screen_height . ,embr-screen-height)
-                   (fps . ,embr-fps)
-                   (jpeg_quality . ,embr-jpeg-quality)
-                   ,@(when embr-color-scheme
-                       `((color_scheme . ,(symbol-name embr-color-scheme))))
-                   ,@(when embr-dom-caret-hack
-                       '((dom_caret . t)))
-                   ,@(when embr-href-preview-hack
-                       '((href_preview . t)))
-                   ,@(when embr-perf-log
-                       '((perf_log . t)))
-                   (frame_source . ,(symbol-name embr-frame-source))
-                   (render_backend . ,(embr--select-backend))
-                   (input_priority_window_ms . ,embr-input-priority-window-ms)
-                   ,@(when embr-adaptive-capture
-                       `((adaptive_capture . t)
-                         (adaptive_fps_min . ,embr-adaptive-fps-min)
-                         (adaptive_jpeg_quality_min . ,embr-adaptive-jpeg-quality-min)))))))
-
-      (if (alist-get 'error resp)
-          (progn
-            (when (and embr--process (process-live-p embr--process))
-              (delete-process embr--process))
-            (setq embr--process nil)
-            (error "embr: init failed: %s" (alist-get 'error resp)))
-        ;; Daemon tells us where it writes frames.
-        (setq embr--frame-path (alist-get 'frame_path resp))
-        (embr--hover-start)
-        (embr--backend-init
-         (or (alist-get 'render_backend resp) "default")
-         (alist-get 'frame_socket_path resp))
-        (message "embr: %s transport, %s backend"
-                 (or (alist-get 'frame_source resp) "unknown")
-                 (embr--backend-name)))))
+  (with-current-buffer embr--normal-buffer
+    ;; Start daemon if needed.
+    (unless (and embr--process (process-live-p embr--process))
+      (setq embr--viewport-width (or embr--viewport-width embr-default-width)
+            embr--viewport-height (or embr--viewport-height embr-default-height))
+      (embr--start-daemon)
+      (let ((resp (embr--send-sync (embr--build-init-params))))
+        (if (alist-get 'error resp)
+            (progn
+              (when (and embr--process (process-live-p embr--process))
+                (delete-process embr--process))
+              (setq embr--process nil)
+              (error "embr: init failed: %s" (alist-get 'error resp)))
+          ;; Daemon tells us where it writes frames.
+          (setq embr--frame-path (alist-get 'frame_path resp))
+          (embr--hover-start)
+          (embr--backend-init
+           (or (alist-get 'render_backend resp) "default")
+           (alist-get 'frame_socket_path resp))
+          (message "embr: %s transport, %s backend"
+                   (or (alist-get 'frame_source resp) "unknown")
+                   (embr--backend-name))))))
   ;; Show buffer and navigate.
-  (switch-to-buffer embr--buffer)
+  (switch-to-buffer embr--normal-buffer)
   (embr-navigate url))
 
 (provide 'embr)
