@@ -142,10 +142,6 @@ To override the dispatch keys, find `(transient-define-prefix embr-dispatch ...)
 
 ![dispatch menu](assets/dispatch.png)
 
-### Bookmarks
-
-Standard Emacs bookmarks work. The dispatch menu (`C-c`) has shortcuts: `b` to add, `j` to jump, `f` to forget. The usual `C-x r m` and `C-x r b` also work.
-
 ## Ad Blocking
 
 **Domain-level blocklist.** The StevenBlack/hosts list (~82K ad and tracker domains) intercepts and kills requests before they hit the network. Works in headless mode, no extension needed.
