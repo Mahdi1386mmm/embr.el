@@ -585,13 +585,7 @@ SOCKET-PATH is the daemon frame socket (used by canvas backend)."
         embr--canvas-frame-count 0
         embr--default-frame-count 0)
   (if (string= name "canvas")
-      (condition-case err
-          (embr--backend-init-canvas socket-path)
-        (error
-         (message "embr: canvas init failed (%s), falling back to default"
-                  (error-message-string err))
-         (setq embr--active-backend "default")
-         (embr--render-start)))
+      (embr--backend-init-canvas socket-path)
     (embr--render-start)))
 
 (defun embr--backend-on-frame (resp)
@@ -637,11 +631,8 @@ SOCKET-PATH is the daemon frame socket (used by canvas backend)."
           (ash (aref str (+ offset 3)) 24)))
 
 (defun embr--canvas-fallback-to-default ()
-  "Switch from canvas to default backend mid-session."
-  (message "embr: canvas errors exceeded threshold, falling back to default")
-  (embr--backend-shutdown-canvas)
-  (setq embr--active-backend "default")
-  (embr--render-start))
+  "Report canvas failure.  No automatic fallback."
+  (message "embr: canvas backend failed — restart embr or check native module"))
 
 (defun embr--canvas-socket-filter (_proc data)
   "Handle binary frame data from the canvas socket.
@@ -669,7 +660,7 @@ and blit the latest to the canvas."
                 (progn (cl-incf embr--canvas-stale-count) nil)
               (setq embr--canvas-last-seq seq)
               (when embr--canvas-image
-                (condition-case nil
+                (condition-case err
                     (progn
                       (embr-canvas-blit-jpeg
                        embr--canvas-image jpeg-data width height seq)
@@ -677,17 +668,14 @@ and blit the latest to the canvas."
                       (setq embr--canvas-error-count 0))
                   (error
                    (cl-incf embr--canvas-error-count)
-                   (when (>= embr--canvas-error-count
-                             embr--canvas-max-errors)
-                     (embr--canvas-fallback-to-default)
-                     (setq done t))))))))))))
+                   (message "embr: canvas blit error %d: %s"
+                            embr--canvas-error-count
+                            (error-message-string err))))))))))))
 
 (defun embr--canvas-socket-sentinel (_proc event)
   "Handle canvas socket disconnect."
   (when (string-match-p "\\(closed\\|connection broken\\)" event)
-    (message "embr: canvas socket closed")
-    (when (string= embr--active-backend "canvas")
-      (embr--canvas-fallback-to-default))))
+    (message "embr: canvas socket closed")))
 
 (defun embr--backend-init-canvas (socket-path)
   "Initialize the canvas render backend.
@@ -740,10 +728,9 @@ Connect to SOCKET-PATH and create the canvas image in the buffer."
            embr--default-frame-count))
 
 (defun embr-force-default-backend ()
-  "Force switch to default backend mid-session."
+  "No-op.  Backend switching is not supported mid-session."
   (interactive)
-  (when (string= embr--active-backend "canvas")
-    (embr--canvas-fallback-to-default)))
+  (message "embr: backend switching is not supported — restart embr"))
 
 ;; ── Display ────────────────────────────────────────────────────────
 

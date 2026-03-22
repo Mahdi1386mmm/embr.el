@@ -117,7 +117,6 @@ async def main():
     screencast_errors = 0
     SCREENCAST_MAX_ERRORS = 5
     title_refresh_task = None
-    _fallback_pending = False
     _last_screencast_frame_ts = 0.0
     _pending_frame_data = None
     _ack_ok_count = 0
@@ -341,7 +340,7 @@ async def main():
     async def start_screencast():
         """Open a CDP session on the current page and start screencast."""
         nonlocal cdp_session, screencast_active, screencast_errors
-        nonlocal _last_screencast_frame_ts, _fallback_pending
+        nonlocal _last_screencast_frame_ts
         nonlocal _pending_frame_data, _ack_ok_count, _ack_ok_logged
         try:
             cdp_session = await page.context.new_cdp_session(page)
@@ -359,7 +358,6 @@ async def main():
             screencast_errors = 0
             _ack_ok_count = 0
             _ack_ok_logged = 0
-            _fallback_pending = False
             _pending_frame_data = None
             _last_screencast_frame_ts = time.monotonic()
             start_title_refresh()
@@ -375,26 +373,10 @@ async def main():
             raise RuntimeError(f"screencast start failed: {e}") from e
 
     def _check_screencast_threshold():
-        """Trigger fallback or stop if errors exceed threshold."""
-        nonlocal _fallback_pending
-        if screencast_errors < SCREENCAST_MAX_ERRORS:
-            return
-        if _fallback_pending:
-            return
-        _fallback_pending = True
-        asyncio.ensure_future(_stop_screencast_with_error(
-            f"screencast failed: {screencast_errors} errors exceeded threshold"))
-
-    async def _stop_screencast_with_error(reason):
-        """Stop screencast in forced mode and notify Emacs.
-
-        Emits a screencast_error notification (not a command response)
-        so it cannot desync the single-callback protocol.
-        """
-        perf.log("screencast_error", reason=reason)
-        print(f"embr: {reason}", file=sys.stderr)
-        await stop_screencast()
-        emit({"screencast_error": reason})
+        """Log screencast errors.  No automatic fallback."""
+        if screencast_errors >= SCREENCAST_MAX_ERRORS:
+            print(f"embr: screencast errors: {screencast_errors}",
+                  file=sys.stderr)
 
     def _on_ack_done(fut):
         """Done callback for screencast frame ack futures."""
@@ -496,8 +478,7 @@ async def main():
 
         Sets screencast_active = False immediately (before any awaits)
         so in-flight ack callbacks see the stopped state and skip error
-        counting.  Does NOT clear _fallback_pending; that flag stays
-        latched until start_screencast resets it on a clean session start.
+        counting.
         """
         nonlocal cdp_session, screencast_active, title_refresh_task
         was_active = screencast_active
@@ -528,21 +509,11 @@ async def main():
         title_refresh_task = asyncio.create_task(_refresh())
 
     def _on_page_crash(crashed_page=None):
-        """Handle page crash by stopping screencast or falling back.
-
-        Only acts if the crashed page is the current active page.
-        Background tab crashes are logged but do not affect the stream.
-        """
-        nonlocal _fallback_pending
+        """Log page crash."""
         if crashed_page is not None and crashed_page != page:
             print("embr: background tab crashed (ignored)", file=sys.stderr)
             return
         print("embr: active page crashed", file=sys.stderr)
-        if not screencast_active or _fallback_pending:
-            return
-        _fallback_pending = True
-        asyncio.ensure_future(
-            _stop_screencast_with_error("screencast lost: page crashed"))
 
     async def _restart_screencast_after_tab_change():
         """Restart screencast on new active page after tab operation.
