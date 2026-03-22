@@ -164,7 +164,7 @@ The top-level keybindings below translate familiar Emacs motion keys into their 
 
 ### Browser commands
 
-Pressing `C-c` opens a transient dispatch menu (like Magit) that shows all available commands grouped by category. You can also type the full sequence directly, e.g. `C-c o` to navigate. Press `C-c ?` to see top-level bindings. Keybindings follow eww conventions where possible.
+Pressing `C-c` opens a transient dispatch menu (like Magit) that shows all available commands grouped by category. You can also type the full sequence directly, e.g. `C-c o` to navigate. Press `C-c ?` to see top-level bindings. The prefix key is configurable via `embr-dispatch-key`, but the underlying keys follow eww conventions where possible and should be kept as-is. By learning embr keys, you learn eww keys too, so if eww is ever updated to handle the modern web, switching has no learning curve.
 
 | Key | Action |
 |-----|--------|
@@ -174,7 +174,9 @@ Pressing `C-c` opens a transient dispatch menu (like Magit) that shows all avail
 | `C-c o` | Open URL or search (same as `C-l`) |
 | `C-c h` | Follow link (Vimium-style hint labels) |
 | `C-c v` | View page text |
+| `C-c e` | View page source |
 | `C-c w` | Copy current URL to kill ring |
+| `C-c d` | Download link |
 | `C-c :` | Execute JavaScript |
 | `C-c c` | New tab |
 | `C-c x` | Close tab |
@@ -192,7 +194,7 @@ Pressing `C-c` opens a transient dispatch menu (like Magit) that shows all avail
 
 ### Bookmarks
 
-Standard Emacs bookmarks work. The dispatch menu (`C-c`) has shortcuts: `m` to save, `j` to jump, `B` to list. The usual `C-x r m` and `C-x r b` also work.
+Standard Emacs bookmarks work. The dispatch menu (`C-c`) has shortcuts: `b` to add, `j` to jump, `f` to forget. The usual `C-x r m` and `C-x r b` also work.
 
 ## Ad Blocking
 
@@ -249,6 +251,10 @@ Mic, camera, and screen sharing do not work.
 ### Will you add vim-like modal keybindings (like Vimium)?
 
 No plans to add this upstream, but PRs are welcome. If you implement it, gate it behind a `defcustom` (e.g. `embr-keymap-style` with `'default` and `'modal` options) and make sure the default behavior is unchanged. Do not break existing keybindings.
+
+### How do I search?
+
+Any non-URL input in `C-c o` (Open URL) or `embr-browse` is treated as a search query. The default engine is Google. Set `embr-search-engine` to `'brave`, `'duckduckgo`, `'bing`, `'yandex`, `'baidu`, or a custom URL string with `%s` for the query (e.g. `"https://search.brave.com/search?q=%s"`).
 
 ### How do I use an AI agent instead of a search engine?
 
