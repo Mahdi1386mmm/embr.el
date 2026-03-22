@@ -249,16 +249,6 @@ Set `embr-proxy-type` to `nil` to disable. The header line shows a red "PROXY" b
       embr-proxy-address "127.0.0.1:4444")
 ```
 
-3. Browse `.i2p` sites like `http://reg.i2p` or `http://stats.i2p`. Pages are slow (5-30 seconds is normal).
-
-The i2pd web console at `127.0.0.1:7070` is a local page, not an I2P site. Set `embr-proxy-type` to `nil` to access it.
-
-I2P is for `.i2p` sites only. For anonymous clearnet browsing, use Tor instead.
-
-### How do I use a different proxy?
-
-Set `embr-proxy-type` to `'socks` or `'http` and `embr-proxy-address` to the host:port. Proxy is applied at launch time, so changing it takes effect on the next session. URL history is not recorded in proxy sessions.
-
 ### Does this work on macOS?
 
 Unknown. Let us know.
