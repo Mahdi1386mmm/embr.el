@@ -1634,23 +1634,37 @@ With prefix argument, prompt for a URL instead."
   "Build a propertized tab bar string from `embr--tab-list'.
 Tabs are equal width and fill the window, like i3 tabbed layout."
   (let* ((ntabs (length embr--tab-list))
-         (win-width (or (window-width) 80))
-         ;; Each tab gets equal share.  Account for separators (1 char each).
+         (total-px (window-pixel-width))
+         (char-w (frame-char-width))
+         ;; Separators: 1 char each between tabs.
          (sep-total (1- ntabs))
-         (tab-width (max 8 (/ (- win-width sep-total) ntabs)))
-         ;; Close button " [x] " takes 5 chars, label gets the rest.
-         (label-width (- tab-width 5))
+         (sep-px (* sep-total char-w))
+         (avail-px (- total-px sep-px))
+         (tab-idx 0)
          (parts nil))
     (dolist (tab embr--tab-list)
       (let* ((idx (alist-get 'index tab))
              (active (eq (alist-get 'active tab) t))
+             ;; Pixel boundaries for this tab (no truncation loss).
+             (left-px (/ (* avail-px tab-idx) ntabs))
+             (right-px (/ (* avail-px (1+ tab-idx)) ntabs))
+             (this-tab-px (- right-px left-px))
+             ;; Close button " [x] " = 5 chars.
+             (close-px (* 5 char-w))
+             (label-px (- this-tab-px close-px))
+             (label-chars (max 1 (/ label-px char-w)))
              (title (or (alist-get 'title tab)
                         (alist-get 'url tab)
                         "untitled"))
-             (label (embr--truncate-tab-title title (- label-width 1)))
-             ;; Pad label to fixed width.
-             (padded (concat " " label
-                             (make-string (max 0 (- label-width 1 (length label))) ?\s)))
+             (label (embr--truncate-tab-title title (1- label-chars)))
+             (text (concat " " label))
+             (text-px (* (length text) char-w))
+             (pad-px (max 0 (- label-px text-px)))
+             ;; Pixel-precise padding via display space spec.
+             (padded (if (> pad-px 0)
+                        (concat text (propertize " " 'display
+                                                 `(space :width (,pad-px))))
+                      text))
              (face (if active 'embr-tab-active 'embr-tab-inactive))
              (tab-str (propertize padded
                                   'face face
@@ -1664,7 +1678,8 @@ Tabs are equal width and fill the window, like i3 tabbed layout."
                                     'keymap embr--tab-close-map
                                     'embr-tab-index idx
                                     'pointer 'hand)))
-        (push (concat tab-str close-str) parts)))
+        (push (concat tab-str close-str) parts)
+        (cl-incf tab-idx)))
     (mapconcat #'identity (nreverse parts)
                (propertize " " 'face 'embr-tab-bar))))
 
