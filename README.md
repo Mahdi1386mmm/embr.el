@@ -172,7 +172,7 @@ Pressing `C-c` opens a transient dispatch menu (like Magit) that shows all avail
 | `C-c l` | Back |
 | `C-c r` | Forward |
 | `C-c p` | Browse tab history |
-| `C-c o` | Open URL or search (same as `C-l`). `C-u` prefix clears URL history. |
+| `C-c o` | Open URL or search (same as `C-l`) |
 | `C-c h` | Follow link (Vimium-style hint labels) |
 | `C-c v` | View page text |
 | `C-c e` | View page source |
@@ -291,7 +291,7 @@ Downloads go through Chromium's network stack, so session cookies and authentica
 
 `C-c p` (Past) shows the current tab's session history from Chromium via CDP. It resets when the tab closes.
 
-`C-c o` (Open URL) has its own URL history built from URLs you have typed or searched. This persists across embr sessions within the same Emacs process. To clear it, use `C-u C-c o` or `C-u M-x embr-navigate`.
+`C-c o` (Open URL) has its own URL history built from URLs you have typed or searched. This persists across embr sessions within the same Emacs process. To clear it, use `C-u M-x embr-navigate`.
 
 ### Does this work on macOS?
 
