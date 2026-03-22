@@ -118,7 +118,7 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-href-preview-hack` | boolean | `t` | Show hovered link URLs in a status bar overlay at the bottom of the page. |
 | `embr-perf-log` | boolean | `nil` | Write JSONL perf events to `/tmp/embr-perf.jsonl`. Analyze with `tools/embr-perf-report.py`. |
 | `embr-hover-move-threshold-px` | integer | `0` | Minimum pixel distance before sending a hover update. Filters sub-pixel jitter. |
-| `embr-external-command` | string | yt-dlp + mpv | Shell command for `&` key (`%s` = URL). Default pipes through yt-dlp into mpv. |
+| `embr-external-command` | string | `yt-dlp -o - %s \| mpv -` | Shell command for `&` key (`%s` = URL). |
 | `embr-download-directory` | directory | `~/Downloads/` | Directory where downloaded files are saved. |
 | `embr-frame-source` | symbol | `'screencast` | `'screencast` uses CDP screencast (recommended). `'screenshot` uses polling only. |
 | `embr-render-backend` | symbol | `'default` | `'default` uses JPEG file + create-image. `'canvas` requires canvas-patched Emacs + native module. |
@@ -156,7 +156,7 @@ The top-level keybindings below translate familiar Emacs motion keys into their 
 | `C-r` | Search backward (isearch-style) |
 | `C-v` | Page down |
 | `M-v` | Page up |
-| `&` | Run `embr-external-command` on current URL (default: `yt-dlp -o - %s \| mpv -`) |
+| `&` | Run `embr-external-command` on current URL |
 | `F5` | Refresh page |
 | `C-x` | Emacs prefix (not forwarded) |
 | `M-x` | Emacs command (not forwarded) |
