@@ -225,6 +225,10 @@ Files save with the correct name on disk (e.g. `archlinux-2026.03.01-x86_64.iso`
 
 You might notice if you use `'headed` mode that this is not Chromium's `--incognito` flag. It is a disposable profile at the filesystem level. The privacy properties are the same (fresh state, destroyed on exit), but extensions like uBlock Origin still work, and you get stronger cleanup guarantees since we control the directory deletion. The missing incognito badge is cosmetic and does not affect the isolation.
 
+### Can I run multiple sessions?
+
+One normal session and one incognito session, simultaneously. Use browser tabs (`C-c c` to open, `C-c ]`/`[` to switch) for multiple pages within a session.
+
 ### How do I browse through Tor?
 
 1. Install and run the [Tor](https://wiki.archlinux.org/title/Tor) service on your machine.
