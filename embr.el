@@ -140,11 +140,10 @@ CloakBrowser choose from its fingerprint profile."
                  (const :tag "Light" light)
                  (const :tag "Auto (CloakBrowser default)" nil)))
 
-(defcustom embr-dom-caret-hack t
+(defcustom embr-dom-caret-hack nil
   "Whether to inject a fake DOM caret in focused text fields.
-CDP screenshots do not capture the native browser caret, so embr
-injects a thin DOM element that tracks the cursor position.  Set
-to nil to disable."
+Only needed with the screenshot transport.  Screencast captures
+the native caret, so this defaults to nil."
   :type 'boolean)
 
 (defcustom embr-download-directory "~/Downloads/"
@@ -1606,21 +1605,22 @@ DESCRIPTION is shown in the prompt."
    ["Actions"
     ("o" "Open URL" embr-navigate)
     ("h" "Follow hint" embr-follow-hint)
-    ("v" "View text" embr-view-text)
-    ("e" "View source" embr-view-source)
     ("w" "Copy URL" embr-copy-url)
     ("d" "Download" embr-download)
-    (":" "Execute JS" embr-execute-js)
-    ("k" "Kill embr" embr-quit)
-    ("q" "Close menu" embr-dispatch-close)
-    ("?" "Top-level bindings" embr-dispatch-keys)]
+    ("v" "View text" embr-view-text)
+    ("e" "View source" embr-view-source)
+    (":" "Execute JS" embr-execute-js)]
    ["Privacy"
     ("1" "Clear cookies" embr-clear-cookies)
     ("2" "Clear cache" embr-clear-cache)
     ("3" "Clear local storage" embr-clear-local-storage)
     ("4" "Clear sessions" embr-clear-sessions)
     ("5" "Clear URL history" embr-clear-url-history)
-    ("0" "Clear all (nuclear)" embr-clear-all)]])
+    ("0" "Clear all (nuclear)" embr-clear-all)]
+   ["Other"
+    ("k" "Kill embr" embr-quit)
+    ("q" "Close menu" embr-dispatch-close)
+    ("?" "Top-level bindkeys" embr-dispatch-keys)]])
 
 ;; ── Keymap ─────────────────────────────────────────────────────────
 
