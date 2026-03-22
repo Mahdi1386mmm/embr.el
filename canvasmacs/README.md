@@ -27,19 +27,20 @@ sudo pacman -R emacs-canvas-wayland
 
 New image type `:type canvas` with pixel buffer access via dynamic modules (`canvas_pixel`, `canvas_refresh`). See the [upstream bug](https://debbugs.gnu.org/cgi/bugreport.cgi?bug=80281) for details.
 
-## embr benchmark: canvas vs legacy
+## embr benchmark: canvas vs default
 
 Canvas decodes JPEG and writes pixels directly into the canvas buffer via a native C module, bypassing Emacs' `create-image` + `erase-buffer` + `insert-image` cycle.
 
-| Metric | Canvas | Legacy |
-|--------|--------|--------|
-| Input-to-frame p50 | 13.5ms | 13.8ms |
-| Input-to-frame p95 | **30.7ms** | 32.3ms |
-| Frame interval p50 | 31.0ms | 29.6ms |
-| Effective FPS | 32.3 | 33.8 |
-| FPS 30+ bucket | 77.7% | 83.9% |
-| Drop ratio | **26.4%** | 33.4% |
-| Render skips | **0** | 21 |
-| Freezes | 3 | 4 |
+| Metric | Canvas | Default |
+|--------|--------|---------|
+| Input-to-frame p50 | **10.0ms** | 14.4ms |
+| Input-to-frame p95 | **28.4ms** | 44.8ms |
+| Frame interval p50 | **28.9ms** | 29.5ms |
+| Effective FPS | **34.6** | 33.9 |
+| FPS 30+ bucket | **78.0%** | 79.5% |
+| Drop ratio | **0.304** | 0.336 |
+| Render skips | **0** | 20 |
+| Freezes | 1 (1485ms) | 1 (2250ms) |
+| Severe freezes | **0** | 1 |
 
-Canvas eliminates render skips (every frame that reaches Emacs gets displayed) and drops fewer frames overall. Input responsiveness is comparable. Both use screencast transport.
+Canvas wins on input latency (30-35% lower at p50/p95), zero render skips again, lower drop ratio, and no severe freezes. Both use screencast transport.
