@@ -124,6 +124,8 @@ All management is done from Emacs, no terminal needed. `setup.sh` builds in a te
 | `embr-dispatch-key` | string | `"C-c"` | Key that opens the transient dispatch menu. Must be set before embr is loaded. |
 | `embr-vimium-leader` | string | `"SPC"` | Key that opens the dispatch menu in vimium normal mode. |
 | `embr-vimium-start-in-normal` | boolean | `t` | Start in normal mode when `embr-vimium-mode` is enabled. |
+| `embr-proxy-type` | symbol/nil | `nil` | `'socks` (SOCKS5) or `'http` (HTTP). When non-nil, routes all browser traffic through `embr-proxy-address`. |
+| `embr-proxy-address` | string/nil | `nil` | Proxy host:port. Only used when `embr-proxy-type` is non-nil. E.g. `"127.0.0.1:9050"` for Tor, `"127.0.0.1:4444"` for I2P. |
 
 
 ## Usage
@@ -222,6 +224,40 @@ Files save with the correct name on disk (e.g. `archlinux-2026.03.01-x86_64.iso`
 `M-x embr-browse-incognito` launches a separate embr daemon with a fresh throwaway Chromium profile in a temp directory. No cookies, no history, no local storage carry over from your normal session. On quit, the temp profile is deleted with `shutil.rmtree()`.
 
 You might notice if you use `'headed` mode that this is not Chromium's `--incognito` flag. It is a disposable profile at the filesystem level. The privacy properties are the same (fresh state, destroyed on exit), but extensions like uBlock Origin still work, and you get stronger cleanup guarantees since we control the directory deletion. The missing incognito badge is cosmetic and does not affect the isolation.
+
+### How do I browse through Tor?
+
+1. Install and run the [Tor](https://wiki.archlinux.org/title/Tor) service on your machine.
+
+2. Add the proxy settings to your embr config:
+
+```elisp
+(setq embr-proxy-type 'socks
+      embr-proxy-address "127.0.0.1:9050")
+```
+
+Set `embr-proxy-type` to `nil` to disable. The header line shows a red "PROXY" badge when active.
+
+### How do I browse I2P?
+
+1. Install and run [i2pd](https://wiki.archlinux.org/title/I2pd). Wait a few minutes for it to bootstrap (check `http://127.0.0.1:7070` in a browser without proxy to see when status shows "OK").
+
+2. Add the proxy settings to your embr config:
+
+```elisp
+(setq embr-proxy-type 'http
+      embr-proxy-address "127.0.0.1:4444")
+```
+
+3. Browse `.i2p` sites like `http://reg.i2p` or `http://stats.i2p`. Pages are slow (5-30 seconds is normal).
+
+The i2pd web console at `127.0.0.1:7070` is a local page, not an I2P site. Set `embr-proxy-type` to `nil` to access it.
+
+I2P is for `.i2p` sites only. For anonymous clearnet browsing, use Tor instead.
+
+### How do I use a different proxy?
+
+Set `embr-proxy-type` to `'socks` or `'http` and `embr-proxy-address` to the host:port. Proxy is applied at launch time, so changing it takes effect on the next session. URL history is not recorded in proxy sessions.
 
 ### Does this work on macOS?
 

@@ -248,6 +248,23 @@ Must be set before embr is loaded."
   "Non-nil means start in normal mode when `embr-vimium-mode' is enabled."
   :type 'boolean)
 
+(defcustom embr-proxy-type nil
+  "Proxy type for browser traffic.
+`socks' for SOCKS5 (e.g. Tor on port 9050), `http' for HTTP
+(e.g. I2P on port 4444), or nil to disable.  When non-nil, embr
+routes all traffic through the proxy at `embr-proxy-address'."
+  :type '(choice (const :tag "No proxy" nil)
+                 (const :tag "SOCKS5" socks)
+                 (const :tag "HTTP" http)))
+
+(defcustom embr-proxy-address nil
+  "Proxy host:port.  Only used when `embr-proxy-type' is non-nil.
+For Tor, set `embr-proxy-type' to `socks' and this to
+\"127.0.0.1:9050\".  For I2P, set `embr-proxy-type' to `http'
+and this to \"127.0.0.1:4444\"."
+  :type '(choice (const :tag "None" nil)
+                 (string :tag "host:port")))
+
 (defun embr--search-url (query)
   "Build a search URL for QUERY using `embr-search-engine'.
 Return a URL string.  If `embr-search-engine' is a function, call it
@@ -488,6 +505,7 @@ Does not remove the Emacs package itself."
 (defvar embr--default-frame-count 0 "Total frames rendered via default backend.")
 (defvar embr--zoom-level 1.0 "Current page zoom level.")
 (defvar embr--incognito-flag nil "Non-nil when this buffer is an incognito session.")
+(defvar embr--proxy-active nil "Non-nil when this session uses a proxy.")
 (defvar embr--muted-flag nil "Non-nil when audio/video is muted.")
 
 ;; ── Process management ─────────────────────────────────────────────
@@ -883,7 +901,9 @@ Dispatch to the active backend for display, then update metadata."
                 changed t))))
     (when changed
       (rename-buffer (format "%s%s*"
-                             (if embr--incognito-flag "*embr incognito: " "*embr: ")
+                             (cond (embr--incognito-flag "*embr incognito: ")
+                                   (embr--proxy-active "*embr proxy: ")
+                                   (t "*embr: "))
                              (if (string-empty-p embr--current-title)
                                  embr--current-url embr--current-title))
                      t)
@@ -926,21 +946,21 @@ With prefix argument, clear URL history."
          (message "embr: URL history cleared")
          (list nil))
      (list (completing-read "URL/Search: "
-                            (unless embr--incognito-flag
+                            (unless (or embr--incognito-flag embr--proxy-active)
                               (lambda (str pred action)
                                 (if (eq action 'metadata)
                                     '(metadata (display-sort-function . identity))
                                   (complete-with-action
                                    action embr--url-history str pred))))
                             nil nil nil
-                            (unless embr--incognito-flag
+                            (unless (or embr--incognito-flag embr--proxy-active)
                               'embr--url-history)))))
   (if (or (null url) (string-empty-p url))
       ;; Empty input navigates to about:blank.
       (embr--send '((cmd . "navigate") (url . "about:blank"))
                   #'embr--action-callback)
     (let ((target (embr--maybe-search-url url)))
-      (unless embr--incognito-flag
+      (unless (or embr--incognito-flag embr--proxy-active)
         (push url embr--url-history)
         (delete-dups embr--url-history))
       (when target
@@ -1795,6 +1815,17 @@ If the mouse is not over a link, fall back to hint selection."
                       (special-mode))
                     (display-buffer buf))))))
 
+;; ── Proxy info ──────────────────────────────────────────────────
+
+(defun embr-proxy-info ()
+  "Display proxy configuration for this session."
+  (interactive)
+  (if embr--proxy-active
+      (message "embr: proxy active (%s://%s)"
+               (pcase embr-proxy-type ('socks "socks5") ('http "http"))
+               embr-proxy-address)
+    (message "embr: no proxy")))
+
 ;; ── Incognito mode ───────────────────────────────────────────────
 ;;
 ;; Uses the same `embr-mode' with buffer-local state.  The only
@@ -1857,6 +1888,8 @@ If the mouse is not over a link, fall back to hint selection."
           (embr--backend-init
            (or (alist-get 'render_backend resp) "default")
            (alist-get 'frame_socket_path resp))
+          (when embr-proxy-type
+            (setq embr--proxy-active t))
           (message "embr incognito: %s transport, %s backend"
                    (or (alist-get 'frame_source resp) "unknown")
                    (embr--backend-name))))))
@@ -2125,6 +2158,7 @@ DESCRIPTION is shown in the prompt."
     ("v" "View text" embr-view-text)
     ("e" "View source" embr-view-source)]
    ["Privacy"
+    ("t" "Proxy info" embr-proxy-info)
     ("1" "Clear cookies" embr-clear-cookies)
     ("2" "Clear cache" embr-clear-cache)
     ("3" "Clear local storage" embr-clear-local-storage)
@@ -2226,6 +2260,7 @@ DESCRIPTION is shown in the prompt."
   (setq-local embr--default-frame-count 0)
   (setq-local embr--zoom-level 1.0)
   (setq-local embr--incognito-flag nil)
+  (setq-local embr--proxy-active nil)
   (setq-local embr--muted-flag nil)
   (setq-local buffer-read-only t)
   (setq-local cursor-type nil)
@@ -2245,6 +2280,8 @@ DESCRIPTION is shown in the prompt."
                            (propertize " MUTED " 'face '(:background "red" :foreground "white")))
                          (when embr--incognito-flag
                            (propertize " INCOGNITO " 'face '(:background "purple" :foreground "white")))
+                         (when embr--proxy-active
+                           (propertize " PROXY " 'face '(:background "red" :foreground "white")))
                          " "
                          (if (string-empty-p embr--current-title)
                              (propertize url 'face 'shadow)
@@ -2348,6 +2385,7 @@ DESCRIPTION is shown in the prompt."
     ("v" "View text" embr-view-text)
     ("e" "View source" embr-view-source)]
    ["Privacy"
+    ("t" "Proxy info" embr-proxy-info)
     ("1" "Clear cookies" embr-clear-cookies)
     ("2" "Clear cache" embr-clear-cache)
     ("3" "Clear local storage" embr-clear-local-storage)
@@ -2476,7 +2514,13 @@ In insert mode, keys pass through to the browser."
     ,@(when embr-adaptive-capture
         `((adaptive_capture . t)
           (adaptive_fps_min . ,embr-adaptive-fps-min)
-          (adaptive_jpeg_quality_min . ,embr-adaptive-jpeg-quality-min)))))
+          (adaptive_jpeg_quality_min . ,embr-adaptive-jpeg-quality-min)))
+    ,@(when embr-proxy-type
+        `((proxy . ,(format "%s://%s"
+                            (pcase embr-proxy-type
+                              ('socks "socks5")
+                              ('http "http"))
+                            embr-proxy-address))))))
 
 ;;;###autoload
 (defun embr-browse (url &optional _new-window)
@@ -2514,6 +2558,8 @@ If the daemon is already running, just navigate to the new URL."
           (embr--backend-init
            (or (alist-get 'render_backend resp) "default")
            (alist-get 'frame_socket_path resp))
+          (when embr-proxy-type
+            (setq embr--proxy-active t))
           (message "embr: %s transport, %s backend"
                    (or (alist-get 'frame_source resp) "unknown")
                    (embr--backend-name))))))

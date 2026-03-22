@@ -609,6 +609,10 @@ async def main():
             color_scheme = params.get("color_scheme")
             if color_scheme:
                 context_opts["color_scheme"] = color_scheme
+            proxy = params.get("proxy")
+            if proxy:
+                context_opts["proxy"] = {"server": proxy}
+                print(f"embr: proxy={proxy}", file=sys.stderr)
             context = await pw.chromium.launch_persistent_context(**context_opts)
             # Attach crash handler to every page (existing and future).
             for p in context.pages:
