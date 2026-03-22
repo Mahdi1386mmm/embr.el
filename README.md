@@ -117,7 +117,7 @@ All management is done from Emacs, no terminal needed. `setup.sh` builds in a te
 | `embr-external-command` | string | `yt-dlp -o - %s \| mpv -` | Shell command for `&` key (`%s` = URL). |
 | `embr-download-directory` | directory | `~/Downloads/` | Directory where downloaded files are saved. |
 | `embr-frame-source` | symbol | `'screencast` | `'screencast` uses CDP screencast (recommended). `'screenshot` uses polling only. |
-| `embr-render-backend` | symbol | `'default` | `'default` uses JPEG file + create-image. `'canvas` requires canvas-patched Emacs + native module. |
+| `embr-render-backend` | symbol | `'default` | `'default` uses JPEG file + create-image. `'canvas` requires canvas-patched Emacs. |
 | `embr-display-method` | symbol | `'headless` | `'headless`, `'headed` (requires Xvfb), `'headed-offscreen` (requires Xvfb). |
 | `embr-dispatch-key` | string | `"C-c"` | Key that opens the transient dispatch menu. Must be set before embr is loaded. |
 
