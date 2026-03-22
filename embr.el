@@ -35,6 +35,7 @@
 
 (require 'cl-lib)
 (require 'image)
+(require 'transient)
 
 ;; ── Customization ──────────────────────────────────────────────────
 
@@ -143,14 +144,37 @@ injects a thin DOM element that tracks the cursor position.  Set
 to nil to disable."
   :type 'boolean)
 
+(defcustom embr-download-directory "~/Downloads/"
+  "Directory where downloaded files are saved."
+  :type 'directory)
+
+(defcustom embr-href-preview-hack t
+  "Whether to inject a link preview overlay on hover.
+Injects a DOM element at the bottom of the page that shows the
+URL of hovered links, like a browser status bar."
+  :type 'boolean)
+
 (defcustom embr-search-engine 'google
   "Search engine for URL bar queries.
-Can be a symbol (`brave', `google', `duckduckgo') or a custom URL
-string with %s for the query."
+Can be a symbol (`brave', `google', `duckduckgo', `bing', `yandex',
+`baidu'), a custom URL string with %s for the query, or a function
+that takes a query string argument.  When set to a function, non-URL
+input is passed to it instead of navigating the browser."
   :type '(choice (const :tag "Brave" brave)
                  (const :tag "Google" google)
                  (const :tag "DuckDuckGo" duckduckgo)
-                 (string :tag "Custom URL (use %s for query)")))
+                 (const :tag "Bing" bing)
+                 (const :tag "Yandex" yandex)
+                 (const :tag "Baidu" baidu)
+                 (string :tag "Custom URL (use %s for query)")
+                 (function :tag "Custom function (takes query string)")))
+
+(defcustom embr-search-prefix nil
+  "String prepended to queries passed to a function search engine.
+Only used when `embr-search-engine' is a function.  Set this to
+inject a system prompt or context before the user's query."
+  :type '(choice (const :tag "None" nil)
+                 (string :tag "Prefix string")))
 
 (defcustom embr-perf-log nil
   "Whether to enable performance logging in the daemon.
@@ -208,14 +232,31 @@ xvfb-run (invisible window, audio works via PulseAudio/PipeWire)."
                  (const :tag "Headed (visible window, audio)" headed)
                  (const :tag "Headed offscreen (hidden window, audio)" headed-offscreen)))
 
+(defcustom embr-dispatch-key "C-c"
+  "Key that opens the transient dispatch menu.
+Must be set before embr is loaded."
+  :type 'string)
+
 (defun embr--search-url (query)
-  "Build a search URL for QUERY using `embr-search-engine'."
-  (let ((template (pcase embr-search-engine
-                    ('brave "https://search.brave.com/search?q=%s")
-                    ('google "https://www.google.com/search?q=%s")
-                    ('duckduckgo "https://duckduckgo.com/?q=%s")
-                    ((pred stringp) embr-search-engine))))
-    (format template (url-hexify-string query))))
+  "Build a search URL for QUERY using `embr-search-engine'.
+Return a URL string.  If `embr-search-engine' is a function, call it
+with QUERY and return nil."
+  (if (functionp embr-search-engine)
+      (progn
+        (funcall embr-search-engine
+                 (if embr-search-prefix
+                     (concat embr-search-prefix query)
+                   query))
+        nil)
+    (let ((template (pcase embr-search-engine
+                      ('brave "https://search.brave.com/search?q=%s")
+                      ('google "https://www.google.com/search?q=%s")
+                      ('duckduckgo "https://duckduckgo.com/?q=%s")
+                      ('bing "https://www.bing.com/search?q=%s")
+                      ('yandex "https://yandex.com/search/?text=%s")
+                      ('baidu "https://www.baidu.com/s?wd=%s")
+                      ((pred stringp) embr-search-engine))))
+      (format template (url-hexify-string query)))))
 
 ;; ── Setup & management ─────────────────────────────────────────────
 
@@ -776,8 +817,9 @@ Dispatch to the active backend for display, then update metadata."
   (let ((target (embr--maybe-search-url url)))
     (push url embr--url-history)
     (delete-dups embr--url-history)
-    (embr--send `((cmd . "navigate") (url . ,target))
-                       #'embr--action-callback)))
+    (when target
+      (embr--send `((cmd . "navigate") (url . ,target))
+                         #'embr--action-callback))))
 
 (defun embr-refresh ()
   "Refresh the current page."
@@ -1058,6 +1100,100 @@ Better compatibility with iframe widgets like Cloudflare Turnstile."
                              (view-mode 1))
                            (display-buffer buf))))))
 
+(defun embr-view-source ()
+  "Fetch page source and display in a separate buffer."
+  (interactive)
+  (embr--send '((cmd . "source"))
+                     (lambda (resp)
+                       (if-let* ((err (alist-get 'error resp)))
+                           (message "embr error: %s" err)
+                         (let ((html (alist-get 'html resp))
+                               (buf (get-buffer-create "*embr-source*")))
+                           (with-current-buffer buf
+                             (let ((inhibit-read-only t))
+                               (erase-buffer)
+                               (insert html))
+                             (goto-char (point-min))
+                             (html-mode)
+                             (view-mode 1))
+                           (display-buffer buf))))))
+
+(defun embr--mouse-image-coords ()
+  "Return mouse position as image coordinates (X . Y), or nil."
+  (let* ((pos (mouse-pixel-position))
+         (frame (car pos))
+         (px (cadr pos))
+         (py (cddr pos)))
+    (when (and frame px py (eq frame (selected-frame)))
+      (let* ((win (get-buffer-window embr--buffer))
+             (edges (and win (window-inside-pixel-edges win))))
+        (when edges
+          (cons (max 0 (min (- px (nth 0 edges))
+                            (1- (or embr--viewport-width embr-default-width))))
+                (max 0 (min (- py (nth 1 edges))
+                            (1- (or embr--viewport-height embr-default-height))))))))))
+
+(defun embr--download-url (url)
+  "Confirm and download URL via the browser."
+  (let ((confirmed (read-string "Download: " url)))
+    (when (and confirmed (not (string-empty-p confirmed)))
+      (let ((dir (expand-file-name embr-download-directory)))
+        (embr--send `((cmd . "download")
+                      (url . ,confirmed)
+                      (directory . ,dir))
+                    (lambda (resp)
+                      (if-let* ((err (alist-get 'error resp)))
+                          (message "embr: %s" err)
+                        (message "Saved: %s" (alist-get 'path resp)))))))))
+
+(defun embr-download ()
+  "Download the link under the mouse cursor.
+If the mouse is not over a link, fall back to hint selection."
+  (interactive)
+  (let ((coords (embr--mouse-image-coords)))
+    (if (null coords)
+        (embr--download-via-hints)
+      (embr--send `((cmd . "link-at-point")
+                    (x . ,(car coords))
+                    (y . ,(cdr coords)))
+                  (lambda (resp)
+                    (let ((href (alist-get 'href resp)))
+                      (if href
+                          (embr--download-url href)
+                        (embr--download-via-hints))))))))
+
+(defun embr--download-via-hints ()
+  "Show link hints, then download the chosen link."
+  (embr--send '((cmd . "hints"))
+              (lambda (resp)
+                (if-let* ((err (alist-get 'error resp)))
+                    (message "embr error: %s" err)
+                  (let* ((hints (alist-get 'hints resp)))
+                    (if (null hints)
+                        (message "embr: no links found")
+                      (setq embr--hints hints)
+                      (run-at-time 0.1 nil #'embr--read-download-hint)))))))
+
+(defun embr--read-download-hint ()
+  "Read a hint tag from the user and download its link."
+  (let* ((descriptions (mapcar (lambda (h)
+                                 (format "%s: %s" (alist-get 'tag h)
+                                         (alist-get 'text h)))
+                               embr--hints))
+         (chosen (condition-case nil
+                     (completing-read "Download hint: " descriptions nil t)
+                   (quit nil))))
+    (embr--send '((cmd . "hints-clear")) nil)
+    (when (and chosen (string-match "\\`\\([^:]+\\):" chosen))
+      (let* ((tag (match-string 1 chosen))
+             (hint (seq-find (lambda (h) (string= (alist-get 'tag h) tag))
+                             embr--hints)))
+        (when hint
+          (let ((href (alist-get 'href hint)))
+            (if href
+                (embr--download-url href)
+              (message "embr: selected element is not a link"))))))))
+
 (defun embr-copy-url ()
   "Copy the current page URL to the kill ring."
   (interactive)
@@ -1298,6 +1434,69 @@ Better compatibility with iframe widgets like Cloudflare Turnstile."
       (embr--send `((cmd . "key") (key . ,pw-key))
                          #'embr--action-callback))))
 
+;; ── Dispatch menu ─────────────────────────────────────────────────
+
+(transient-define-prefix embr-dispatch-keys ()
+  "Show top-level embr bindings."
+  [["Emacs Motion"
+    ("C-n" "Down" embr-self-insert :transient nil)
+    ("C-p" "Up" embr-self-insert :transient nil)
+    ("C-f" "Right" embr-self-insert :transient nil)
+    ("C-b" "Left" embr-self-insert :transient nil)
+    ("C-a" "Home" embr-self-insert :transient nil)
+    ("C-e" "End" embr-self-insert :transient nil)
+    ("C-d" "Delete" embr-self-insert :transient nil)
+    ("M-f" "Word right" embr-self-insert :transient nil)
+    ("M-b" "Word left" embr-self-insert :transient nil)]
+   ["Scroll / Page"
+    ("C-v" "Page down" embr-self-insert :transient nil)
+    ("M-v" "Page up" embr-self-insert :transient nil)]
+   ["Clipboard"
+    ("M-w" "Copy" embr-copy)
+    ("C-y" "Paste" embr-paste)]
+   ["Search"
+    ("C-s" "Search forward" embr-isearch-forward)
+    ("C-r" "Search backward" embr-isearch-backward)]
+   ["Other"
+    ("C-l" "Navigate" embr-navigate)
+    ("&"   "External player" embr-play-external)
+    ("<f5>" "Refresh" embr-refresh)
+    ("C-c" "You are here" embr-dispatch)
+    ("q" "Close menu" embr-dispatch-close)]])
+
+(defun embr-dispatch-close ()
+  "Close the dispatch menu."
+  (interactive))
+
+(transient-define-prefix embr-dispatch ()
+  "Show available embr browser commands."
+  [["Navigation"
+    ("g" "Reload" embr-refresh)
+    ("l" "Back" embr-back)
+    ("r" "Forward" embr-forward)
+]
+   ["Tabs"
+    ("c" "New" embr-new-tab)
+    ("x" "Close" embr-close-tab)
+    ("]" "Next" embr-next-tab)
+    ("[" "Previous" embr-prev-tab)
+    ("s" "Switch" embr-list-tabs)]
+   ["Bookmarks"
+    ("b" "Add" bookmark-set)
+    ("j" "Jump" bookmark-jump)
+    ("f" "Forget" bookmark-delete)]
+   ["Actions"
+    ("o" "Open URL" embr-navigate)
+    ("h" "Follow hint" embr-follow-hint)
+    ("v" "View text" embr-view-text)
+    ("e" "View source" embr-view-source)
+    ("w" "Copy URL" embr-copy-url)
+    ("d" "Download" embr-download)
+    (":" "Execute JS" embr-execute-js)
+    ("k" "Kill embr" embr-quit)
+    ("q" "Close menu" embr-dispatch-close)
+    ("?" "Top-level bindings" embr-dispatch-keys)]])
+
 ;; ── Keymap ─────────────────────────────────────────────────────────
 
 (defvar embr-mode-map nil "Keymap for `embr-mode'.")
@@ -1339,24 +1538,8 @@ Better compatibility with iframe widgets like Cloudflare Turnstile."
     (define-key map [wheel-down] #'embr-scroll-down)
     (define-key map [wheel-up] #'embr-scroll-up)
 
-    ;; Browser commands under C-c prefix (Emacs convention for major modes).
-    (define-key map (kbd "C-c l") #'embr-navigate)
-    (define-key map (kbd "C-c r") #'embr-refresh)
-    (define-key map (kbd "C-c b") #'embr-back)
-    (define-key map (kbd "C-c f") #'embr-forward)
-    (define-key map (kbd "C-c q") #'embr-quit)
-    (define-key map (kbd "C-c C-k") #'embr-quit)
-    (define-key map (kbd "C-c C-f") #'embr-forward)
-    (define-key map (kbd "C-c C-b") #'embr-back)
-    (define-key map (kbd "C-c h") #'embr-follow-hint)
-    (define-key map (kbd "C-c t") #'embr-view-text)
-    (define-key map (kbd "C-c w") #'embr-copy-url)
-    (define-key map (kbd "C-c n") #'embr-new-tab)
-    (define-key map (kbd "C-c d") #'embr-close-tab)
-    (define-key map (kbd "C-c ]") #'embr-next-tab)
-    (define-key map (kbd "C-c [") #'embr-prev-tab)
-    (define-key map (kbd "C-c a") #'embr-list-tabs)
-    (define-key map (kbd "C-c :") #'embr-execute-js)
+    ;; Dispatch menu (default C-c).
+    (define-key map (kbd embr-dispatch-key) #'embr-dispatch)
     map))
 
 ;; ── Major mode ─────────────────────────────────────────────────────
@@ -1407,6 +1590,8 @@ If the daemon is already running, just navigate to the new URL."
                        `((color_scheme . ,(symbol-name embr-color-scheme))))
                    ,@(when embr-dom-caret-hack
                        '((dom_caret . t)))
+                   ,@(when embr-href-preview-hack
+                       '((href_preview . t)))
                    ,@(when embr-perf-log
                        '((perf_log . t)))
                    (frame_source . ,(symbol-name embr-frame-source))

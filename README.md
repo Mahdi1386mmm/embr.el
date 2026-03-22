@@ -1,7 +1,7 @@
 ## embr.el
 **Em**acs **Br**owser
 
-Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakbrowser.dev) is the renderer. Frame transport uses CDP screencast. Emacs canvas (optional) is also supported for added performance. If you build Emacs with the [canvas patch](https://github.com/minad/emacs-canvas-patch) (see [./canvasmacs](./canvasmacs)), embr renders frames directly to a pixel buffer via a native C module, skipping the per-frame disk round-trip.
+Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakbrowser.dev) is the renderer. Frame transport uses CDP screencast. Emacs canvas (optional) is also supported for added performance. If you build Emacs with the [canvas patch](https://github.com/minad/emacs-canvas-patch) (see [./canvasmacs](./canvasmacs)), embr renders frames directly to a pixel buffer via a native C module.
 
 ![embr screenshot](assets/screenshot.png)
 
@@ -109,17 +109,21 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | `embr-screen-width` | integer | `1920` | Screen width reported to websites (should be >= viewport) |
 | `embr-screen-height` | integer | `1080` | Screen height reported to websites (should be >= viewport) |
 | `embr-color-scheme` | symbol/nil | `'dark` | `'dark`, `'light`, or `nil` to let CloakBrowser choose. Controls `prefers-color-scheme`. |
-| `embr-search-engine` | symbol/string | `'google` | `'google`, `'brave`, `'duckduckgo`, or custom URL with `%s` |
+| `embr-search-engine` | symbol/string/function | `'google` | `'google`, `'brave`, `'duckduckgo`, `'bing`, `'yandex`, `'baidu`, custom URL with `%s`, or a function taking one string argument (the query). Non-URL input is passed to the function instead of navigating the browser. |
+| `embr-search-prefix` | string/nil | `nil` | String prepended to queries when `embr-search-engine` is a function |
 | `embr-click-method` | symbol | `'immediate` | `'atomic` defers mousedown until drag detected, better iframe compat. `'immediate` sends mousedown instantly, for press-and-hold sites. |
 | `embr-scroll-method` | symbol | `'instant` | `'instant` scrolls instantly. `'smooth` scrolls with CSS animation. |
 | `embr-scroll-step` | integer | `100` | Scroll distance in pixels per wheel notch |
 | `embr-dom-caret-hack` | boolean | `t` | Inject a fake DOM caret in focused text fields. CDP screenshots don't capture the native caret. |
+| `embr-href-preview-hack` | boolean | `t` | Show hovered link URLs in a status bar overlay at the bottom of the page. |
 | `embr-perf-log` | boolean | `nil` | Write JSONL perf events to `/tmp/embr-perf.jsonl`. Analyze with `tools/embr-perf-report.py`. |
 | `embr-hover-move-threshold-px` | integer | `0` | Minimum pixel distance before sending a hover update. Filters sub-pixel jitter. |
 | `embr-external-command` | string | yt-dlp + mpv | Shell command for `&` key (`%s` = URL). Default pipes through yt-dlp into mpv. |
+| `embr-download-directory` | directory | `~/Downloads/` | Directory where downloaded files are saved. |
 | `embr-frame-source` | symbol | `'screencast` | `'screencast` uses CDP screencast (recommended). `'screenshot` uses polling only. |
 | `embr-render-backend` | symbol | `'default` | `'default` uses JPEG file + create-image. `'canvas` requires canvas-patched Emacs + native module. |
 | `embr-display-method` | symbol | `'headless` | `'headless` (no window, no audio), `'headed` (visible window, audio), `'headed-offscreen` (hidden window via Xvfb, audio). |
+| `embr-dispatch-key` | string | `"C-c"` | Key that opens the transient dispatch menu. Must be set before embr is loaded. |
 
 
 ## Usage
@@ -156,34 +160,39 @@ The top-level keybindings below translate familiar Emacs motion keys into their 
 | `F5` | Refresh page |
 | `C-x` | Emacs prefix (not forwarded) |
 | `M-x` | Emacs command (not forwarded) |
-| `C-c` | Browser command prefix (see below) |
+| `C-c` | Open dispatch menu (transient, like Magit) |
 
 ### Browser commands
 
-Browser commands use the `C-c` prefix. Eww-inspired commands, just behind a prefix instead of on top-level keys. This gives a more natural browser typing experience while keeping power tools a combo away.
+Pressing `C-c` opens a transient dispatch menu (like Magit) that shows all available commands grouped by category. You can also type the full sequence directly, e.g. `C-c o` to navigate. Press `C-c ?` to see top-level bindings. Keybindings follow eww conventions where possible.
 
 | Key | Action |
 |-----|--------|
-| `C-c l` | Go to URL or search (same as `C-l`) |
+| `C-c g` | Reload |
+| `C-c l` | Back |
+| `C-c r` | Forward |
+| `C-c o` | Open URL or search (same as `C-l`) |
 | `C-c h` | Follow link (Vimium-style hint labels) |
-| `C-c r` | Refresh |
-| `C-c b` / `C-c C-b` | Back |
-| `C-c f` / `C-c C-f` | Forward |
-| `C-c t` | View page text in a separate buffer |
+| `C-c v` | View page text |
 | `C-c w` | Copy current URL to kill ring |
 | `C-c :` | Execute JavaScript |
-| `C-c q` | Quit (kills daemon and buffer) |
-| `C-c n` | Open new tab |
-| `C-c d` | Close current tab |
+| `C-c c` | New tab |
+| `C-c x` | Close tab |
 | `C-c ]` / `C-c [` | Next / previous tab |
-| `C-c a` | List all tabs |
+| `C-c s` | Switch tab |
+| `C-c b` | Add bookmark |
+| `C-c j` | Jump to bookmark |
+| `C-c f` | Forget bookmark |
+| `C-c k` | Kill embr (daemon and buffer) |
+| `C-c ?` | Show top-level bindings |
+| `C-c q` | Close dispatch menu |
 | Mouse click | Click at coordinates |
 | Click and drag | Select text |
 | Scroll wheel | Scroll page |
 
 ### Bookmarks
 
-Standard Emacs bookmarks work: `C-x r m` to save, `C-x r b` to jump.
+Standard Emacs bookmarks work. The dispatch menu (`C-c`) has shortcuts: `m` to save, `j` to jump, `B` to list. The usual `C-x r m` and `C-x r b` also work.
 
 ## Ad Blocking
 
@@ -223,17 +232,49 @@ For ad blocking beyond domain-level, you can install [uBlock Origin](https://git
 
 ## FAQ
 
+### Why CloakBrowser?
+
+Plain Playwright was fast but made the modern web nearly unusable. Corporate apps would immediately flag it as a bot and throw captchas. We switched to Camoufox (a hardened Firefox fork) and bot detection stopped, but it came with a significant performance cost. Camoufox masks timing signals across a large portion of the Firefox stack, which adds up.
+
+CloakBrowser is a Chromium-based alternative that applies stealth via source-level C++ patches rather than JS overrides. The overhead is much lower. After switching, bot detection stayed gone and performance came back. That is why we use it.
+
 ### Does audio/video work?
 
-**Video playback works.**
+Video playback works.
 
-**Audio playback works.** Headless Chromium routes audio through PulseAudio/PipeWire.
+Audio playback works.
 
-**Mic, camera, and screen sharing do not work.**
+Mic, camera, and screen sharing do not work.
 
 ### Will you add vim-like modal keybindings (like Vimium)?
 
 No plans to add this upstream, but PRs are welcome. If you implement it, gate it behind a `defcustom` (e.g. `embr-keymap-style` with `'default` and `'modal` options) and make sure the default behavior is unchanged. Do not break existing keybindings.
+
+### How do I use an AI agent instead of a search engine?
+
+Set `embr-search-engine` to a function that accepts a single string argument. Any non-URL input from the navigate prompt (`C-c o` or `embr-browse`) goes to your function instead of the browser.
+
+```elisp
+(setq embr-search-engine #'my-llm-search-function
+      embr-search-prefix "You're my google. Provide best results: ")
+```
+
+The function receives the query (with prefix prepended if set) as its only argument. This works with any agent buffer or LLM interface as long as your function takes a string. How you handle the query is up to you.
+
+To make links in the AI response open back in embr, completing the loop:
+
+```elisp
+(setq browse-url-browser-function 'embr-browse)
+(global-goto-address-mode 1)
+```
+
+### How do I download files?
+
+Clicking a downloadable link (e.g. a .zip or .tar.gz) does nothing. Unsolicited downloads are actively cancelled. Headless browsers are used for automation, and silently writing files to disk without explicit user action would be a security risk. embr only downloads when you ask it to.
+
+Use `C-c d` to download. Hover over a link so the status bar shows the URL, then press `C-c d`. The URL appears in the minibuffer for confirmation. Press RET and the file saves to `embr-download-directory` (defaults to `~/Downloads/`). If your mouse is not over a link, hint labels appear so you can pick one.
+
+Downloads go through Chromium's network stack, so session cookies and authentication are preserved. Protected/login-gated downloads work the same as in a normal browser.
 
 ### Does this work on macOS?
 

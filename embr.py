@@ -87,6 +87,7 @@ async def main():
     page = None
     loop_task = None
     running = True
+    download_expected = False  # True only during C-c d flow
     target_fps = 30
     jpeg_quality = 80
     cached_title = ""
@@ -622,7 +623,7 @@ async def main():
                 ],
                 viewport={"width": width, "height": height},
                 screen={"width": sw, "height": sh},
-                accept_downloads=False,
+                accept_downloads=True,
             )
             color_scheme = params.get("color_scheme")
             if color_scheme:
@@ -632,6 +633,12 @@ async def main():
             for p in context.pages:
                 p.on("crash", _on_page_crash)
             context.on("page", lambda p: p.on("crash", _on_page_crash))
+
+            # Cancel unsolicited downloads (only C-c d sets download_expected).
+            async def _on_download(download):
+                if not download_expected:
+                    await download.cancel()
+            context.on("download", _on_download)
             # Ad blocking via request interception.
             blocked = load_blocklist()
             if blocked:
@@ -728,6 +735,31 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
             if dom_caret:
                 await context.add_init_script(_CARET_BODY)
 
+            href_preview = params.get("href_preview", False)
+            _LINK_STATUS_BODY = """
+if (window.__embr_link_status) return;
+window.__embr_link_status = true;
+function embrStartLinkStatus() {
+    var bar = document.createElement('div');
+    bar.id = '__embr_link_status';
+    bar.style.cssText = 'position:fixed;z-index:2147483647;bottom:0;left:0;max-width:80%;padding:2px 8px;font:12px/16px monospace;color:#ccc;background:rgba(30,30,30,0.85);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;display:none;border-top-right-radius:3px;';
+    document.body.appendChild(bar);
+    document.addEventListener('mouseover', function(e) {
+        var a = e.target.closest('a[href]');
+        if (a) {
+            bar.textContent = a.href;
+            bar.style.display = 'block';
+        } else {
+            bar.style.display = 'none';
+        }
+    }, true);
+}
+if (document.body) embrStartLinkStatus();
+else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
+"""
+            if href_preview:
+                await context.add_init_script(_LINK_STATUS_BODY)
+
             target_fps = params.get("fps", 60)
             jpeg_quality = params.get("jpeg_quality", 80)
 
@@ -746,6 +778,11 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
             if dom_caret:
                 try:
                     await page.evaluate("() => {" + _CARET_BODY + "}")
+                except Exception:
+                    pass
+            if href_preview:
+                try:
+                    await page.evaluate("() => {" + _LINK_STATUS_BODY + "}")
                 except Exception:
                     pass
 
@@ -955,7 +992,8 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
                     hint.style.left = r.left + 'px';
                     hint.style.top = r.top + 'px';
                     document.body.appendChild(hint);
-                    results.push({tag: tag, x: r.left + r.width/2, y: r.top + r.height/2, text: (el.textContent || el.value || '').trim().slice(0, 60)});
+                    var href = el.closest('a[href]') ? el.closest('a[href]').href : null;
+                    results.push({tag: tag, x: r.left + r.width/2, y: r.top + r.height/2, text: (el.textContent || el.value || '').trim().slice(0, 60), href: href});
                 });
                 return results;
             }""")
@@ -965,9 +1003,55 @@ else document.addEventListener('DOMContentLoaded', embrStartCaret);
             await page.evaluate("() => document.querySelectorAll('.embr-hint').forEach(e => e.remove())")
             return {"ok": True}
 
+        if cmd == "link-at-point":
+            x, y = params["x"], params["y"]
+            href = await page.evaluate("""([x, y]) => {
+                var el = document.elementFromPoint(x, y);
+                if (!el) return null;
+                var a = el.closest('a[href]');
+                return a ? a.href : null;
+            }""", [x, y])
+            return {"ok": True, "href": href}
+
+        if cmd == "download":
+            nonlocal download_expected
+            url = params["url"]
+            directory = params["directory"]
+            try:
+                download_expected = True
+                async with page.expect_download(timeout=30000) as dl_info:
+                    await page.evaluate("""(url) => {
+                        var a = document.createElement('a');
+                        a.href = url;
+                        a.download = '';
+                        a.style.display = 'none';
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                    }""", url)
+                download = await dl_info.value
+                filename = download.suggested_filename
+                save_path = os.path.join(directory, filename)
+                # Deduplicate filename if it already exists.
+                base, ext = os.path.splitext(save_path)
+                counter = 1
+                while os.path.exists(save_path):
+                    save_path = f"{base}({counter}){ext}"
+                    counter += 1
+                await download.save_as(save_path)
+                return {"ok": True, "path": save_path, "filename": filename}
+            except Exception as e:
+                return {"error": f"download failed: {e}"}
+            finally:
+                download_expected = False
+
         if cmd == "text":
             text = await page.inner_text("body")
             return {"ok": True, "text": text}
+
+        if cmd == "source":
+            html = await page.content()
+            return {"ok": True, "html": html}
 
         if cmd == "fill":
             await page.fill(params["selector"], params["value"])
