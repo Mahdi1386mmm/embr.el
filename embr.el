@@ -1945,13 +1945,14 @@ DESCRIPTION is shown in the prompt."
     ("w" "Copy URL" embr-copy-url)
     ("y" "Copy link" embr-copy-link)
     ("d" "Download" embr-download)
+    (":" "Execute JS" embr-execute-js)]
+   ["Export"
     ("i" "Print PDF" embr-print-pdf)
     ("n" "Screenshot" embr-screenshot)
     ("a" "Reader" embr-reader)
     ("p" "Page info" embr-page-info)
     ("v" "View text" embr-view-text)
-    ("e" "View source" embr-view-source)
-    (":" "Execute JS" embr-execute-js)]
+    ("e" "View source" embr-view-source)]
    ["Privacy"
     ("1" "Clear cookies" embr-clear-cookies)
     ("2" "Clear cache" embr-clear-cache)
