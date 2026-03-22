@@ -101,11 +101,14 @@ realistic browser fingerprint."
   "Shell command for `embr-play-external'.
 %s is replaced with the current page URL (shell-quoted).
 Examples:
-  \"yt-dlp -o - %s | mpv -\"                — stream via yt-dlp into mpv (default)
-  \"yt-dlp --cookies-from-browser chromium:~/.local/share/embr/chromium-profile -o - %s | mpv -\"
-    — same but with embr's cookies (for age-restricted content)
-  \"mpv %s\"       — open directly in mpv
-  \"chromium %s\"  — open in Chromium"
+  \"yt-dlp -o - %s | mpv -\"
+    stream via yt-dlp into mpv (default)
+  \"yt-dlp --cookies-from-browser
+    chromium:~/.local/share/embr/chromium-profile
+    -o - %s | mpv -\"
+    same but with embr's cookies (age-restricted)
+  \"mpv %s\"       open directly in mpv
+  \"chromium %s\"  open in Chromium"
   :type 'string)
 
 (defcustom embr-click-method 'immediate
@@ -312,7 +315,7 @@ See README.md for instructions."
 ;;;###autoload
 (defun embr-uninstall ()
   "Remove the Python venv, CloakBrowser, and browser profile.
-This does NOT remove the Emacs package itself — use your package manager for that."
+Does not remove the Emacs package itself."
   (interactive)
   (let ((script (expand-file-name "uninstall.sh" embr--directory)))
     (unless (file-exists-p script)
@@ -446,6 +449,9 @@ Respects `embr-display-method' for display modes."
                   ((alist-get 'frame resp)
                    ;; Frame notification — just remember the latest one.
                    (setq last-frame resp))
+                  ((alist-get 'metadata resp)
+                   ;; Navigation metadata — update URL/title immediately.
+                   (embr--update-metadata resp))
                   ((alist-get 'screencast_error resp)
                    ;; Screencast error notification — always show to user.
                    (message "embr: %s" (alist-get 'screencast_error resp)))
@@ -745,20 +751,17 @@ Connect to SOCKET-PATH and create the canvas image in the buffer."
   "Handle a frame notification from the daemon.
 Dispatch to the active backend for display, then update metadata."
   (setq embr--pressure (eq (alist-get 'pressure resp) t))
-  (let ((title (or (alist-get 'title resp) ""))
-        (url (or (alist-get 'url resp) ""))
+  (let ((url (or (alist-get 'url resp) ""))
         (frame-id (alist-get 'frame_id resp))
         (capture-mono (alist-get 'capture_done_mono_ms resp)))
     (when (buffer-live-p embr--buffer)
       ;; Backend-specific frame display.
       (embr--backend-on-frame resp)
-      ;; Both backends: update buffer name on title/url change.
-      (with-current-buffer embr--buffer
-        (unless (and (string= title embr--current-title)
-                     (string= url embr--current-url))
-          (rename-buffer (format "*embr: %s*"
-                                 (if (string-empty-p title) url title))
-                         t)))
+      ;; Update URL from frame (title comes via metadata messages).
+      (unless (string= url embr--current-url)
+        (setq embr--current-url url)
+        (with-current-buffer embr--buffer
+          (force-mode-line-update)))
       ;; Send render ack for perf logging.
       (when (and embr-perf-log frame-id capture-mono
                  embr--process (process-live-p embr--process))
@@ -768,21 +771,26 @@ Dispatch to the active backend for display, then update metadata."
                   `((cmd . "frame_rendered")
                     (frame_id . ,frame-id)
                     (capture_done_mono_ms . ,capture-mono)))
-                 "\n")))
-      (setq embr--current-title title
-            embr--current-url url))))
+                 "\n"))))))
 
 (defun embr--update-metadata (resp)
   "Update URL and title from command RESP if present."
-  (when-let* ((url (alist-get 'url resp)))
-    (setq embr--current-url url))
-  (when-let* ((title (alist-get 'title resp)))
-    (setq embr--current-title title)
-    (when (buffer-live-p embr--buffer)
+  (let ((changed nil))
+    (when-let* ((url (alist-get 'url resp)))
+      (unless (string= url embr--current-url)
+        (setq embr--current-url url
+              changed t)))
+    (when-let* ((title (alist-get 'title resp)))
+      (unless (string= title embr--current-title)
+        (setq embr--current-title title
+              changed t)))
+    (when (and changed (buffer-live-p embr--buffer))
       (with-current-buffer embr--buffer
         (rename-buffer (format "*embr: %s*"
-                               (if (string-empty-p title) embr--current-url title))
-                       t)))))
+                               (if (string-empty-p embr--current-title)
+                                   embr--current-url embr--current-title))
+                       t)
+        (force-mode-line-update)))))
 
 (defun embr--action-callback (resp)
   "Generic callback for command responses: report errors, update metadata."
@@ -1552,6 +1560,18 @@ If the mouse is not over a link, fall back to hint selection."
   (setq-local void-text-area-pointer 'arrow)
   (setq-local pointer-shape 'arrow)
   (setq-local bookmark-make-record-function #'embr--bookmark-make-record)
+  (setq-local header-line-format
+              '(:eval (let ((url (if (> (length embr--current-url) 40)
+                                     (concat (substring embr--current-url 0 40) "...")
+                                   embr--current-url)))
+                        (concat
+                         " "
+                         (if (string-empty-p embr--current-title)
+                             (propertize url 'face 'shadow)
+                           (concat
+                            (propertize url 'face 'shadow)
+                            (propertize " — " 'face 'shadow)
+                            (propertize embr--current-title 'face 'bold)))))))
   (add-hook 'pre-command-hook #'embr--maybe-end-search nil t))
 
 ;; ── Entry point ────────────────────────────────────────────────────

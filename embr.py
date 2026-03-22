@@ -91,6 +91,7 @@ async def main():
     target_fps = 30
     jpeg_quality = 80
     cached_title = ""
+    _last_nav_url = None
     frame_count = 0
 
     # Input-priority scheduler state.
@@ -161,7 +162,7 @@ async def main():
 
     async def write_frame():
         """Take a JPEG screenshot, write atomically to disk, notify Emacs."""
-        nonlocal cached_title, frame_count, capture_ema
+        nonlocal frame_count, capture_ema
         fid = perf.next_frame_id()
         t0 = time.monotonic()
         perf.log("capture_start", frame_id=fid)
@@ -184,13 +185,8 @@ async def main():
                 f.write(jpg_bytes)
             os.rename(tmp, FRAME_PATH)
         frame_count += 1
-        if frame_count % 15 == 0:
-            try:
-                cached_title = await page.title()
-            except Exception:
-                pass
         capture_done_mono_ms = round(t_capture_done * 1000, 2)
-        emit_frame({"frame": True, "title": cached_title, "url": page.url,
+        emit_frame({"frame": True, "url": page.url,
                     "pressure": mode == "interactive" or target_fps < fps_max,
                     "frame_id": fid, "capture_done_mono_ms": capture_done_mono_ms})
         now = time.monotonic()
@@ -436,7 +432,7 @@ async def main():
             os.rename(tmp, FRAME_PATH)
         fid = perf.next_frame_id()
         capture_done_mono_ms = round(now * 1000, 2)
-        emit_frame({"frame": True, "title": cached_title, "url": page.url,
+        emit_frame({"frame": True, "url": page.url,
                     "pressure": mode == "interactive",
                     "frame_id": fid,
                     "capture_done_mono_ms": capture_done_mono_ms})
@@ -519,16 +515,11 @@ async def main():
             cdp_session = None
 
     def start_title_refresh():
-        """Start async task to refresh title and flush buffered frames."""
+        """Start async task to flush buffered frames periodically."""
         nonlocal title_refresh_task
 
         async def _refresh():
-            nonlocal cached_title
             while screencast_active:
-                try:
-                    cached_title = await page.title()
-                except Exception:
-                    pass
                 # Flush any buffered frame that hasn't been emitted.
                 if _pending_frame_data is not None:
                     _flush_pending_frame(time.monotonic())
@@ -786,6 +777,30 @@ else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
                 except Exception:
                     pass
 
+            # Poll URL/title and push changes to Emacs.
+            async def _metadata_loop():
+                nonlocal cached_title, _last_nav_url
+                while running and page and not page.is_closed():
+                    try:
+                        url = page.url
+                        title = await page.title()
+                    except Exception:
+                        await asyncio.sleep(1)
+                        continue
+                    changed = False
+                    if url != _last_nav_url:
+                        _last_nav_url = url
+                        changed = True
+                    if title and title != cached_title:
+                        cached_title = title
+                        changed = True
+                    if changed:
+                        emit({"metadata": True, "url": url,
+                              "title": cached_title})
+                    await asyncio.sleep(0.5)
+
+            asyncio.ensure_future(_metadata_loop())
+
             # Start frame capture (frame_source validated at top of init).
             active_source = frame_source
             if frame_source == "screenshot":
@@ -825,11 +840,7 @@ else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
                 await page.goto(url, wait_until="domcontentloaded", timeout=10000)
             except Exception:
                 pass  # Timeout or nav error — page state visible via screenshots.
-            try:
-                cached_title = await page.title()
-            except Exception:
-                pass
-            return {"ok": True, "url": page.url, "title": cached_title}
+            return {"ok": True, "url": page.url}
 
         # Mousemove: fire-and-forget CDP (isTrusted=true for CSS :hover).
         # Cancel-and-replace — each new move cancels the previous.
@@ -866,8 +877,6 @@ else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
             return {"ok": True}
 
         # Click: JS evaluate (Runtime domain, no CDP pipe contention).
-        # Awaited (not fire-and-forget) so pushState completes before
-        # the response, keeping the URL in sync for hint clicks.
         if cmd == "click":
             try:
                 await page.evaluate(_CLICK_JS, [params["x"], params["y"]])
@@ -877,11 +886,7 @@ else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
                 url = await page.evaluate("() => window.location.href")
             except Exception:
                 url = page.url
-            try:
-                cached_title = await page.title()
-            except Exception:
-                pass
-            return {"ok": True, "url": url, "title": cached_title}
+            return {"ok": True, "url": url}
         # Mousedown/mouseup: CDP (isTrusted=true, needed for native text
         # selection).  Fire-and-forget — infrequent (one per drag) so they
         # find gaps in the pipe like keyboard events.
@@ -929,33 +934,21 @@ else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
                 await page.go_back(wait_until="domcontentloaded", timeout=5000)
             except Exception:
                 pass
-            try:
-                cached_title = await page.title()
-            except Exception:
-                pass
-            return {"ok": True, "url": page.url, "title": cached_title}
+            return {"ok": True, "url": page.url}
 
         if cmd == "forward":
             try:
                 await page.go_forward(wait_until="domcontentloaded", timeout=5000)
             except Exception:
                 pass
-            try:
-                cached_title = await page.title()
-            except Exception:
-                pass
-            return {"ok": True, "url": page.url, "title": cached_title}
+            return {"ok": True, "url": page.url}
 
         if cmd == "refresh":
             try:
                 await page.reload(wait_until="domcontentloaded", timeout=10000)
             except Exception:
                 pass
-            try:
-                cached_title = await page.title()
-            except Exception:
-                pass
-            return {"ok": True, "url": page.url, "title": cached_title}
+            return {"ok": True, "url": page.url}
 
         if cmd == "js":
             result = await page.evaluate(params["expr"])
