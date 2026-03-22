@@ -124,7 +124,7 @@ All management is done from Emacs, no terminal needed. `setup.sh` builds in a te
 | `embr-dispatch-key` | string | `"C-c"` | Key that opens the transient dispatch menu. Must be set before embr is loaded. |
 | `embr-vimium-leader` | string | `"SPC"` | Key that opens the dispatch menu in vimium normal mode. |
 | `embr-vimium-start-in-normal` | boolean | `t` | Start in normal mode when `embr-vimium-mode` is enabled. |
-| `embr-proxy-type` | symbol/nil | `nil` | `'socks` (SOCKS5) or `'http` (HTTP). When non-nil, routes all browser traffic through `embr-proxy-address`. |
+| `embr-proxy-type` | symbol/nil | `nil` | `'socks` (SOCKS5) or `'http` (HTTP). When non-nil, routes all browser traffic through `embr-proxy-address`. Header line shows a red "PROXY" badge when active. |
 | `embr-proxy-address` | string/nil | `nil` | Proxy host:port. Only used when `embr-proxy-type` is non-nil. E.g. `"127.0.0.1:9050"` for Tor, `"127.0.0.1:4444"` for I2P. |
 
 
