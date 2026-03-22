@@ -1523,7 +1523,6 @@ If the mouse is not over a link, fall back to hint selection."
     ("C-l" "Navigate" embr-navigate)
     ("&"   "External player" embr-play-external)
     ("<f5>" "Refresh" embr-refresh)
-    ("C-c" "You are here" embr-dispatch)
     ("q" "Close menu" embr-dispatch-close)]])
 
 ;; ── Privacy: data clearing ────────────────────────────────────────
