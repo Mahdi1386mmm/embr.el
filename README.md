@@ -152,7 +152,7 @@ Standard Emacs bookmarks work. The dispatch menu (`C-c`) has shortcuts: `b` to a
 
 ### Enabling extensions in headed mode
 
-uBlock Origin and Dark Reader are Chromium extensions. After installing them, they need a one-time manual enable in headed mode (headless Chromium does not show extension UI).
+uBlock Origin and Dark Reader are Chromium extensions. After installing them, they need a one-time manual enable in headed mode (headless Chromium does not show extension UI). Headed mode requires Xvfb.
 
 1. **Switch to headed mode** so you can see the browser:
 
