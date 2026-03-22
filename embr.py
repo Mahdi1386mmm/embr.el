@@ -83,6 +83,58 @@ def load_blocklist():
     return domains
 
 
+def _generate_pac(rules):
+    """Generate a PAC script from a list of proxy routing rules."""
+    lines = ["function FindProxyForURL(url, host) {"]
+    catch_all = None
+    for r in rules:
+        suffix = r["suffix"]
+        ptype = r["type"].upper()
+        if ptype == "HTTP":
+            ptype = "PROXY"
+        addr = r["address"]
+        if suffix == "*":
+            catch_all = f"{ptype} {addr}"
+            continue
+        lines.append(
+            f'  if (dnsDomainIs(host, "{suffix}")) return "{ptype} {addr}";')
+    if catch_all:
+        lines.append(f'  return "{catch_all}";')
+    else:
+        lines.append('  return "DIRECT";')
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _install_proxy_extension(rules, data_dir):
+    """Generate a Chrome proxy extension from routing rules.
+
+    Uses chrome.proxy API instead of --proxy-pac-url so that SOCKS5
+    proxies handle DNS resolution (required for .onion, .i2p)."""
+    import json as _json
+    ext_dir = Path(data_dir) / "extensions" / "embr-proxy"
+    ext_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "manifest_version": 2,
+        "name": "embr-proxy",
+        "version": "1.0",
+        "permissions": ["proxy"],
+        "background": {"scripts": ["background.js"]},
+    }
+    pac_script = _generate_pac(rules)
+    background_js = (
+        "chrome.proxy.settings.set({\n"
+        "  value: {\n"
+        "    mode: 'pac_script',\n"
+        f"    pacScript: {{ data: {_json.dumps(pac_script)} }}\n"
+        "  },\n"
+        "  scope: 'regular'\n"
+        "});\n"
+    )
+    (ext_dir / "manifest.json").write_text(_json.dumps(manifest, indent=2))
+    (ext_dir / "background.js").write_text(background_js)
+
+
 async def main():
     from playwright.async_api import async_playwright
     from cloakbrowser.download import ensure_binary
@@ -609,10 +661,18 @@ async def main():
             color_scheme = params.get("color_scheme")
             if color_scheme:
                 context_opts["color_scheme"] = color_scheme
-            proxy = params.get("proxy")
-            if proxy:
-                context_opts["proxy"] = {"server": proxy}
-                print(f"embr: proxy={proxy}", file=sys.stderr)
+            proxy_rules = params.get("proxy_rules")
+            if proxy_rules:
+                _install_proxy_extension(proxy_rules, data_dir)
+                proxy_ext = str(data_dir / "extensions" / "embr-proxy")
+                for i, arg in enumerate(chrome_args):
+                    if arg.startswith("--load-extension="):
+                        chrome_args[i] = f"{arg},{proxy_ext}"
+                        break
+                else:
+                    chrome_args.append(f"--load-extension={proxy_ext}")
+                print(f"embr: proxy extension ({len(proxy_rules)} rules)",
+                      file=sys.stderr)
             context = await pw.chromium.launch_persistent_context(**context_opts)
             # Attach crash handler to every page (existing and future).
             for p in context.pages:

@@ -37,8 +37,7 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
         embr-home-url "about:blank"
         embr-session-restore t
         embr-tab-bar t
-        embr-proxy-type nil
-        embr-proxy-address nil))
+        embr-proxy-rules nil))
 ```
 
 **straight.el**
@@ -66,8 +65,7 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
         embr-home-url "about:blank"
         embr-session-restore t
         embr-tab-bar t
-        embr-proxy-type nil
-        embr-proxy-address nil))
+        embr-proxy-rules nil))
 ```
 
 **Tip:** Make embr your default Emacs browser and enable clickable URLs everywhere:
@@ -137,8 +135,7 @@ All management is done from Emacs, no terminal needed. `setup.sh` builds in a te
 | `embr-tab-bar` | boolean | `nil` | Non-nil means show a clickable tab bar above the page. Click to switch, click "x" to close. |
 | `embr-home-url` | string | `"about:blank"` | URL to navigate to when embr is launched interactively. |
 | `embr-session-restore` | boolean | `nil` | Non-nil means save and restore open tabs across sessions. |
-| `embr-proxy-type` | symbol/nil | `nil` | `'socks` (SOCKS5) or `'http` (HTTP). When non-nil, routes all browser traffic through `embr-proxy-address`. Header line shows a red "PROXY" badge when active. |
-| `embr-proxy-address` | string/nil | `nil` | Proxy host:port. Only used when `embr-proxy-type` is non-nil. E.g. `"127.0.0.1:9050"` for Tor, `"127.0.0.1:4444"` for I2P. |
+| `embr-proxy-rules` | list/nil | `nil` | Per-domain proxy routing. Each entry is `(SUFFIX TYPE ADDRESS)`. `.onion` through Tor, `.i2p` through I2P, `*` as catch-all. Generates a PAC file for Chromium. Header line shows a red "PROXY" badge when set. |
 
 
 ## Usage
@@ -242,29 +239,19 @@ You might notice if you use `'headed` mode that this is not Chromium's `--incogn
 
 One normal session and one incognito session, simultaneously. Use browser tabs (`C-c c` to open, `C-c ]`/`[` to switch) for multiple pages within a session.
 
-### How do I browse through Tor?
+### How do I browse through Tor / I2P?
 
-1. Install and run the [Tor](https://wiki.archlinux.org/title/Tor) service on your machine.
-
-2. Add the proxy settings to your embr config:
+`embr-proxy-rules` routes domains through different proxies. Unmatched domains go direct.
 
 ```elisp
-(setq embr-proxy-type 'socks
-      embr-proxy-address "127.0.0.1:9050")
+(setq embr-proxy-rules
+      '((".onion" socks5 "127.0.0.1:9050") ; route .onion through Tor
+        (".i2p"   http   "127.0.0.1:4444") ; route .i2p through I2P
+        ;; ("*"      socks5 "127.0.0.1:9050") ; uncomment to send everything through Tor
+        ))
 ```
 
-Set `embr-proxy-type` to `nil` to disable. The header line shows a red "PROXY" badge when active.
-
-### How do I browse I2P?
-
-1. Install and run [i2pd](https://wiki.archlinux.org/title/I2pd). Wait a few minutes for it to bootstrap (check `http://127.0.0.1:7070` in a browser without proxy to see when status shows "OK").
-
-2. Add the proxy settings to your embr config:
-
-```elisp
-(setq embr-proxy-type 'http
-      embr-proxy-address "127.0.0.1:4444")
-```
+Requires [Tor](https://wiki.archlinux.org/title/Tor) and/or [i2pd](https://wiki.archlinux.org/title/I2pd) running locally. The header line shows a red "PROXY" badge when routing through a proxy rule.
 
 ### Where are the scroll bars?
 

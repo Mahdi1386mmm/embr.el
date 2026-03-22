@@ -265,22 +265,23 @@ On quit, tab URLs are saved to a file.  On next launch, tabs are
 reopened automatically."
   :type 'boolean)
 
-(defcustom embr-proxy-type nil
-  "Proxy type for browser traffic.
-`socks' for SOCKS5 (e.g. Tor on port 9050), `http' for HTTP
-(e.g. I2P on port 4444), or nil to disable.  When non-nil, embr
-routes all traffic through the proxy at `embr-proxy-address'."
-  :type '(choice (const :tag "No proxy" nil)
-                 (const :tag "SOCKS5" socks)
-                 (const :tag "HTTP" http)))
+(defcustom embr-proxy-rules nil
+  "Per-domain proxy routing rules.
+Each entry is (SUFFIX TYPE ADDRESS).  SUFFIX is a domain suffix
+like \".onion\" or an exact hostname like \"example.com\".  Use
+\"*\" as a catch-all.  TYPE is `http' or `socks5'.  ADDRESS is
+\"host:port\".  Domains not matching any rule go direct.
 
-(defcustom embr-proxy-address nil
-  "Proxy host:port.  Only used when `embr-proxy-type' is non-nil.
-For Tor, set `embr-proxy-type' to `socks' and this to
-\"127.0.0.1:9050\".  For I2P, set `embr-proxy-type' to `http'
-and this to \"127.0.0.1:4444\"."
-  :type '(choice (const :tag "None" nil)
-                 (string :tag "host:port")))
+Example:
+  \\='((\".onion\" socks5 \"127.0.0.1:9050\") ; Tor
+    (\".i2p\"   http   \"127.0.0.1:4444\") ; I2P
+    ;; (\"*\"   socks5 \"127.0.0.1:9050\") ; everything through Tor
+    )"
+  :type '(repeat (list (string :tag "Domain suffix")
+                       (choice (const :tag "SOCKS5" socks5)
+                               (const :tag "HTTP" http))
+                       (string :tag "host:port")))
+  :group 'embr)
 
 (defface embr-tab-bar
   '((t :inherit header-line))
@@ -542,7 +543,18 @@ Does not remove the Emacs package itself."
 (defvar embr--default-frame-count 0 "Total frames rendered via default backend.")
 (defvar embr--zoom-level 1.0 "Current page zoom level.")
 (defvar embr--incognito-flag nil "Non-nil when this buffer is an incognito session.")
-(defvar embr--proxy-active nil "Non-nil when this session uses a proxy.")
+(defvar embr--proxy-active nil "Non-nil when this session has proxy rules configured.")
+
+(defun embr--url-proxied-p (url)
+  "Return non-nil if URL matches a proxy rule in `embr-proxy-rules'."
+  (when (and embr-proxy-rules url (not (string-empty-p url)))
+    (let ((host (replace-regexp-in-string
+                 "\\`https?://\\([^/:]+\\).*" "\\1" url)))
+      (cl-some (lambda (r)
+                 (let ((suffix (nth 0 r)))
+                   (or (string= suffix "*")
+                       (string-suffix-p suffix host))))
+               embr-proxy-rules))))
 (defvar embr--muted-flag nil "Non-nil when audio/video is muted.")
 (defvar embr--tab-list nil "Cached tab list from the daemon.")
 
@@ -940,7 +952,7 @@ Dispatch to the active backend for display, then update metadata."
     (when changed
       (rename-buffer (format "%s%s*"
                              (cond (embr--incognito-flag "*embr incognito: ")
-                                   (embr--proxy-active "*embr proxy: ")
+                                   ((embr--url-proxied-p embr--current-url) "*embr proxy: ")
                                    (t "*embr: "))
                              (if (string-empty-p embr--current-title)
                                  embr--current-url embr--current-title))
@@ -984,21 +996,22 @@ With prefix argument, clear URL history."
          (message "embr: URL history cleared")
          (list nil))
      (list (completing-read "URL/Search: "
-                            (unless (or embr--incognito-flag embr--proxy-active)
+                            (unless embr--incognito-flag
                               (lambda (str pred action)
                                 (if (eq action 'metadata)
                                     '(metadata (display-sort-function . identity))
                                   (complete-with-action
                                    action embr--url-history str pred))))
                             nil nil nil
-                            (unless (or embr--incognito-flag embr--proxy-active)
+                            (unless embr--incognito-flag
                               'embr--url-history)))))
   (if (or (null url) (string-empty-p url))
       ;; Empty input navigates to about:blank.
       (embr--send '((cmd . "navigate") (url . "about:blank"))
                   #'embr--action-callback)
     (let ((target (embr--maybe-search-url url)))
-      (unless (or embr--incognito-flag embr--proxy-active)
+      (unless (or embr--incognito-flag
+                   (embr--url-proxied-p (or target url)))
         (push url embr--url-history)
         (delete-dups embr--url-history))
       (when target
@@ -2058,12 +2071,14 @@ If the mouse is not over a link, fall back to hint selection."
 ;; ── Proxy info ──────────────────────────────────────────────────
 
 (defun embr-proxy-info ()
-  "Display proxy configuration for this session."
+  "Display proxy routing rules for this session."
   (interactive)
-  (if embr--proxy-active
-      (message "embr: proxy active (%s://%s)"
-               (pcase embr-proxy-type ('socks "socks5") ('http "http"))
-               embr-proxy-address)
+  (if embr-proxy-rules
+      (message "embr: proxy rules: %s"
+               (mapconcat (lambda (r)
+                            (format "%s -> %s://%s"
+                                    (nth 0 r) (nth 1 r) (nth 2 r)))
+                          embr-proxy-rules ", "))
     (message "embr: no proxy")))
 
 ;; ── Incognito mode ───────────────────────────────────────────────
@@ -2124,8 +2139,7 @@ If the mouse is not over a link, fall back to hint selection."
               (setq embr--process nil)
               (error "embr incognito: init failed: %s" (alist-get 'error resp)))
           (setq embr--frame-path (alist-get 'frame_path resp))
-          (when embr-proxy-type
-            (setq embr--proxy-active t))
+          (setq embr--proxy-active (and embr-proxy-rules t))
           (when embr-tab-bar
             (let ((tr (embr--send-sync '((cmd . "list-tabs")))))
               (unless (alist-get 'error tr)
@@ -2538,7 +2552,7 @@ DESCRIPTION is shown in the prompt."
                            (propertize " MUTED " 'face '(:background "red" :foreground "white")))
                          (when embr--incognito-flag
                            (propertize " INCOGNITO " 'face '(:background "purple" :foreground "white")))
-                         (when embr--proxy-active
+                         (when (embr--url-proxied-p embr--current-url)
                            (propertize " PROXY " 'face '(:background "red" :foreground "white")))
                          " "
                          (propertize url 'face 'shadow)
@@ -2777,12 +2791,13 @@ In insert mode, keys pass through to the browser."
         `((adaptive_capture . t)
           (adaptive_fps_min . ,embr-adaptive-fps-min)
           (adaptive_jpeg_quality_min . ,embr-adaptive-jpeg-quality-min)))
-    ,@(when embr-proxy-type
-        `((proxy . ,(format "%s://%s"
-                            (pcase embr-proxy-type
-                              ('socks "socks5")
-                              ('http "http"))
-                            embr-proxy-address))))))
+    ,@(when embr-proxy-rules
+        `((proxy_rules . ,(vconcat
+                           (mapcar (lambda (r)
+                                     `((suffix . ,(nth 0 r))
+                                       (type . ,(symbol-name (nth 1 r)))
+                                       (address . ,(nth 2 r))))
+                                   embr-proxy-rules)))))))
 
 ;;;###autoload
 (defun embr-browse (&optional url _new-window)
@@ -2817,8 +2832,7 @@ Lisp with a URL argument, navigate to that URL."
               (error "embr: init failed: %s" (alist-get 'error resp)))
           ;; Daemon tells us where it writes frames.
           (setq embr--frame-path (alist-get 'frame_path resp))
-          (when embr-proxy-type
-            (setq embr--proxy-active t))
+          (setq embr--proxy-active (and embr-proxy-rules t))
           ;; Restore session or navigate before starting frames.
           (let ((restored (embr--restore-session)))
             (if restored
