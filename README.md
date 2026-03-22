@@ -266,6 +266,10 @@ Set `embr-proxy-type` to `nil` to disable. The header line shows a red "PROXY" b
       embr-proxy-address "127.0.0.1:4444")
 ```
 
+### Where are the scroll bars?
+
+Headless Chromium does not render scroll bars. Setting `embr-display-method` to `'headed-offscreen` brings them back (requires Xvfb).
+
 ### Does this work on macOS?
 
 Unknown. Let us know.
