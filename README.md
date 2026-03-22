@@ -156,7 +156,7 @@ The top-level keybindings below translate familiar Emacs motion keys into their 
 | `C-r` | Search backward (isearch-style) |
 | `C-v` | Page down |
 | `M-v` | Page up |
-| `&` | Run `embr-external-command` on current URL (default: yt-dlp + mpv) |
+| `&` | Run `embr-external-command` on current URL (default: `yt-dlp -o - %s \| mpv -`) |
 | `F5` | Refresh page |
 | `C-x` | Emacs prefix (not forwarded) |
 | `M-x` | Emacs command (not forwarded) |
@@ -164,7 +164,7 @@ The top-level keybindings below translate familiar Emacs motion keys into their 
 
 ### Browser commands
 
-Pressing `C-c` opens a transient dispatch menu (like Magit) that shows all available commands grouped by category. You can also type the full sequence directly, e.g. `C-c o` to navigate. Press `C-c ?` to see top-level bindings. The prefix key is configurable via `embr-dispatch-key`, but the underlying keys follow eww conventions where possible and should be kept as-is. By learning embr keys, you learn eww keys too, so if eww is ever updated to handle the modern web, switching has no learning curve.
+Pressing `C-c` opens a transient dispatch menu (like Magit) that shows all available commands grouped by category. Press `C-c ?` to see top-level bindings. The prefix key is configurable via `embr-dispatch-key`, but the underlying keys follow eww conventions where possible and should be kept as-is. By learning embr keys, you learn eww keys too, so if eww is ever updated to handle the modern web, switching has no learning curve.
 
 | Key | Action |
 |-----|--------|
