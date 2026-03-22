@@ -58,8 +58,6 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
         embr-display-method 'headless))
 ```
 
-**Tip:** Of all the settings available, `embr-hover-rate` is the most mystifying. Higher values (e.g. 60) give lower-latency hover and can help with finicky buttons. Lower values (e.g. 20) reduce CDP traffic and may improve click reliability on slower machines. Setting this too high risks input lockups. Worth fiddling with.
-
 **Tip:** Make embr your default Emacs browser and enable clickable URLs everywhere:
 
 ```elisp
@@ -69,24 +67,23 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
 
 ## Setup
 
-After installing, run `M-x embr-setup-or-update-all` to create the Python venv and download CloakBrowser.
+After installing, run `M-x embr-install-or-update-cloakbrowser` to create the Python venv and download CloakBrowser. This is the only required step. If you skip it, `M-x embr-browse` will offer to run it for you.
 
-If you skip this step, `M-x embr-browse` will detect the missing venv and offer to run setup for you automatically.
+Everything else is optional. The blocklist, uBlock Origin, and Dark Reader are independent add-ons. Each has its own install and remove command. You pick what you want.
 
-### Management commands
-
-All management is done from Emacs, no terminal needed.
-
-| Command | Description |
+| Command | What it does |
 |---------|-------------|
-| `M-x embr-setup-or-update-all` | Install or update CloakBrowser + ad blocklist + uBlock Origin (runs `setup.sh --all`) |
-| `M-x embr-update-blocklist` | Update the ad/tracker domain blocklist |
-| `M-x embr-update-ublock` | Update uBlock Origin to the latest release |
-| `M-x embr-install-or-update-darkreader` | Install or update [Dark Reader](https://github.com/darkreader/darkreader) to the latest release |
-| `M-x embr-uninstall` | Remove venv and browser profile. Optionally delete browser cache (runs `uninstall.sh`). |
-| `M-x embr-info` | Show diagnostic info about the installation |
+| `M-x embr-install-or-update-cloakbrowser` | Install or update Python venv + CloakBrowser binary (required) |
+| `M-x embr-install-or-update-blocklist` | Install or update the [StevenBlack/hosts](https://github.com/StevenBlack/hosts) domain blocklist |
+| `M-x embr-install-or-update-ublock` | Install or update [uBlock Origin](https://github.com/gorhill/uBlock) |
+| `M-x embr-install-or-update-darkreader` | Install or update [Dark Reader](https://github.com/darkreader/darkreader) |
+| `M-x embr-remove-blocklist` | Remove the domain blocklist |
+| `M-x embr-remove-ublock` | Remove uBlock Origin |
+| `M-x embr-remove-darkreader` | Remove Dark Reader |
+| `M-x embr-uninstall` | Remove everything (`~/.local/share/embr/` and `~/.cloakbrowser/`) |
+| `M-x embr-info` | Show what is installed |
 
-The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's always safe to re-run for both first install and updates.
+All management is done from Emacs, no terminal needed. `setup.sh` builds in a temp venv and swaps atomically, so install and update are the same operation.
 
 ### Where state is stored
 
@@ -95,8 +92,6 @@ The underlying `setup.sh` builds in a temp venv and swaps atomically, so it's al
 | Python venv | `~/.local/share/embr/.venv/` | same |
 | Browser binary | `~/.cloakbrowser/` | `~/.cache/camoufox/` |
 | Cookies & sessions | `~/.local/share/embr/chromium-profile/` | `~/.local/share/embr/firefox-profile/` |
-
-`M-x embr-uninstall` removes the venv and profile. Browser cache deletion is offered as an optional prompt.
 
 ## Configuration
 
@@ -153,13 +148,11 @@ Standard Emacs bookmarks work. The dispatch menu (`C-c`) has shortcuts: `b` to a
 
 ## Ad Blocking
 
-Two layers of ad blocking are available.
+**Domain-level blocklist.** The StevenBlack/hosts list (~82K ad and tracker domains) intercepts and kills requests before they hit the network. Works in headless mode, no extension needed.
 
-**Domain-level blocklist** (built in). The [StevenBlack/hosts](https://github.com/StevenBlack/hosts) list (~82K ad and tracker domains) intercepts and kills requests to blocked domains before they hit the network.
+### Enabling extensions in headed mode
 
-### uBlock Origin (optional)
-
-For ad blocking beyond domain-level, you can install [uBlock Origin](https://github.com/gorhill/uBlock) as a Chromium extension. It is downloaded by `M-x embr-setup-or-update-all` but requires one-time manual setup in headed mode (headless Chromium does not support extensions).
+uBlock Origin and Dark Reader are Chromium extensions. After installing them, they need a one-time manual enable in headed mode (headless Chromium does not show extension UI).
 
 1. **Install Xvfb** (if you don't have it, needed for `headed-offscreen` mode):
 
@@ -178,24 +171,16 @@ For ad blocking beyond domain-level, you can install [uBlock Origin](https://git
    (setq embr-display-method 'headed)
    ```
 
-3. **Enable the extension.** Navigate to `chrome://extensions`, turn on **Developer mode** (top-right toggle), and enable uBlock Origin if it is not already active.
+3. **Enable the extension.** Navigate to `chrome://extensions`, turn on **Developer mode** (top-right toggle), and enable the extension.
 
-4. **Switch to headed-offscreen** and restart embr. The extension persists in your browser profile across restarts.
+4. **Switch to headed-offscreen** and restart embr. Extensions persist in your browser profile across restarts.
 
    ```elisp
    (setq embr-display-method 'headed-offscreen)
    ```
 
 
-### Dark Reader (optional)
-
-[Dark Reader](https://github.com/darkreader/darkreader) forces dark mode on websites that don't support it natively. Not included in `M-x embr-setup-or-update-all`. To install:
-
-1. Run `M-x embr-install-or-update-darkreader`.
-2. Enable it the same way as uBlock above (headed mode, `chrome://extensions`, Developer mode, enable).
-3. Switch back to `headed-offscreen` and restart. The extension persists in your profile.
-
-To manage, disable, or remove it, switch to `'headed` mode and visit `chrome://extensions`.
+To disable an extension temporarily, switch to `'headed` mode and visit `chrome://extensions`.
 
 ## FAQ
 
@@ -210,6 +195,8 @@ CloakBrowser is a Chromium-based alternative that applies stealth via source-lev
 Video playback works.
 
 Audio playback works.
+
+PDF viewing works.
 
 Mic, camera, and screen sharing do not work.
 
@@ -230,14 +217,7 @@ Set `embr-search-engine` to a function that accepts a single string argument. An
       embr-search-prefix "You're my google. Provide best results: ")
 ```
 
-The function receives the query (with prefix prepended if set) as its only argument. This works with any agent buffer or LLM interface as long as your function takes a string. How you handle the query is up to you.
-
-To make links in the AI response open back in embr, completing the loop:
-
-```elisp
-(setq browse-url-browser-function 'embr-browse)
-(global-goto-address-mode 1)
-```
+The function receives the query (with prefix prepended if set) as its only argument. This works with any agent buffer or LLM interface as long as your function takes a string. How you handle the query is up to you. If you set `browse-url-browser-function` to `'embr-browse` (see Installation tip above), links in the AI response open back in embr, completing the loop.
 
 ### How do I download files?
 
@@ -246,6 +226,8 @@ Clicking a downloadable link (e.g. a .zip or .tar.gz) does nothing. Unsolicited 
 Use `C-c d` to download. Hover over a link so the status bar shows the URL, then press `C-c d`. The URL appears in the minibuffer for confirmation. Press RET and the file saves to `embr-download-directory` (defaults to `~/Downloads/`). If your mouse is not over a link, hint labels appear so you can pick one.
 
 Downloads go through Chromium's network stack, so session cookies and authentication are preserved. Protected/login-gated downloads work the same as in a normal browser.
+
+Files save with the correct name on disk (e.g. `archlinux-2026.03.01-x86_64.iso`), but `chrome://downloads` may show a UUID instead (e.g. `74c99e0d-e367-439d-8425-9c6926a20cf9`). This is a Chromium quirk with how embr triggers downloads internally. The file on disk is correct.
 
 ### How does incognito mode work?
 

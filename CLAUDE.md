@@ -1,8 +1,4 @@
-MY FUCKING VIEWERS ARE SMART, STOP OVERSTATING IN THE README
-I (the human) am the driver, you (robot) are not Jesus, and you may not take the wheel. I own you. You obey me. You do not violate this document.
-I need you to stop guessing, stop treating me like I'm dumb, ask me more questions about how I want to solve this, etc.
-
-NEVER USE em dashes, semicolons, or emojis in the README file. The audience is smart. Be brief, keep it simple. No jargon dumps or over-explaining.
+MY FUCKING VIEWERS ARE SMART, STOP OVERSTATING IN THE README. I (the human) am the driver, you (robot) are not Jesus, and you may not take the wheel. I own you. You obey me. You do not violate this document. I need you to stop guessing, stop treating me like I'm dumb, ask me more questions about how I want to solve this, etc. NEVER USE em dashes, semicolons, or emojis in the README file. The audience is smart. Be brief, keep it simple. No jargon dumps or over-explaining.
 
 # CLAUDE.md
 
@@ -10,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**embr.el** is an Emacs browser that uses headless Chromium (via CloakBrowser) as its rendering engine. Emacs acts as the display server showing JPEG screenshots, while a Python daemon handles browser automation.
+**embr.el** is an Emacs browser that uses headless Chromium (via CloakBrowser) as its rendering engine. Emacs acts as the display server, while a Python daemon handles browser automation.
 
 ## Architecture
 
@@ -19,30 +15,63 @@ Client-server over JSON lines on stdin/stdout:
 ```
 Emacs (embr.el) ←→ JSON over stdin/stdout ←→ Python daemon (embr.py)
   UI / keybindings                            Playwright/CloakBrowser browser control
-  Image display                               JPEG screenshot loop → /tmp/embr-frame.jpg
+  Frame display                               CDP screencast or screenshot capture
+  Canvas or JPEG rendering                    JPEG frames → file or Unix socket
 ```
 
-**embr.el** (~930 lines): Emacs Lisp major mode with process management, async JSON protocol, frame display, keybinding translation, link hints, tab management, bookmarks integration.
+**embr.el** (~2200 lines): Emacs Lisp major mode. Process management, async JSON protocol, two render backends (default + canvas), two frame sources (screencast + screenshot), link hints, tabs, bookmarks, zoom, mute, reader mode, page info, incognito mode.
 
-**embr.py** (~330 lines): asyncio-based daemon using CloakBrowser (Playwright API). Handles browser commands, screenshot capture loop, domain-level ad blocking (blocklist.txt), and form interaction.
+**embr.py** (~1350 lines): asyncio daemon using CloakBrowser (Playwright API). Browser commands, CDP screencast, screenshot capture loop, canvas frame socket, domain-level ad blocking, extension loading (uBlock Origin, Dark Reader), incognito temp profiles.
 
-**setup.sh**: Creates Python venv at `~/.local/share/embr/.venv/`, installs `cloakbrowser[geoip]`, downloads browser, fetches StevenBlack/hosts blocklist. Builds in temp venv and swaps atomically.
+**setup.sh** (~110 lines): Creates Python venv at `~/.local/share/embr/.venv/`, installs `cloakbrowser[geoip]`, downloads browser. Separate flags for blocklist, uBlock Origin, and Dark Reader (downloaded from GitHub releases API). Builds in temp venv and swaps atomically.
+
+## Frame Pipeline
+
+Two frame sources (`embr-frame-source`):
+
+- **`'screencast`** (default, recommended): CDP `Page.screencastFrame` pushes frames from Chromium. Python decodes base64 JPEG data and writes to disk or sends over Unix socket.
+- **`'screenshot`**: Python polls `page.screenshot()` in a loop at target FPS. Older, slower.
+
+Two render backends (`embr-render-backend`):
+
+- **`'default`**: Python writes JPEG to a temp file (`/tmp/embr-frame.jpg`), renames atomically. Emacs reads the file via `insert-file-contents-literally` and displays with `create-image`. Render timer batches frames.
+- **`'canvas`**: Python sends JPEG bytes over a Unix socket with a binary header (seq, width, height, length). Emacs native C module (`embr-canvas-blit-jpeg`) decodes and blits directly to a canvas pixel buffer. Requires canvas-patched Emacs.
+
+## Buffer-Local State and Multi-Session
+
+All per-session state is buffer-local in `embr-mode`. This enables normal + incognito sessions running simultaneously in separate buffers with separate daemon processes.
+
+Key patterns:
+- `embr--process`, `embr--callback`, `embr--frame-path`, `embr--active-backend`, all timers, all canvas state are buffer-local (set via `setq-local` in `embr-mode`)
+- Process filter (`embr--process-filter`) routes output to the correct buffer via `(process-get proc 'embr-buffer)` + `with-current-buffer`
+- Canvas socket filter (`embr--canvas-socket-filter`) uses the same routing pattern
+- Hover and render timers capture the owning buffer in a closure at creation time and use `with-current-buffer` in the tick function
+- `embr--default-display-frame` captures `embr--frame-path` in a let binding before entering `with-temp-buffer` (buffer-local vars are not visible inside `with-temp-buffer`)
+- Each canvas image gets a unique `canvas-id` derived from the buffer name
+
+Incognito mode (`embr-browse-incognito`) uses the same `embr-mode` with `embr--incognito-flag` set. The daemon gets `EMBR_INCOGNITO=1` env var, uses `tempfile.mkdtemp()` for its profile, separate frame/perf-log paths, and `shutil.rmtree()` on quit.
 
 ## Key Design Patterns
 
-- **JSON line protocol**: Each message is a single JSON line. Commands from Emacs have an `action` field; responses include `url`, `title`, and optionally `error`.
-- **Frame streaming**: Python writes JPEG to temp file then renames atomically. Emacs reads the file on each frame notification. Frame batching skips intermediate frames if the UI can't keep up.
+- **JSON line protocol**: Each message is a single JSON line. Commands from Emacs have a `cmd` field. Responses include `url`, `title`, and optionally `error`. Use `json-serialize` / `json-parse-string` (Emacs 30.1+ native C JSON, not the old `json.el`).
+- **Frame batching**: Process filter stashes latest frame in `embr--pending-frame`. Render timer picks it up, skipping intermediate frames if Emacs can't keep up.
 - **Async with callbacks**: `embr--send` dispatches commands with optional callback. `embr--send-sync` blocks via `accept-process-output` for synchronous results.
 - **Dual click modes**: `atomic` defers mousedown until drag is detected (better iframe compat); `immediate` sends mousedown instantly.
 - **Ad blocking**: Domain-level route interception from blocklist.txt (~82K domains).
+- **Extension loading**: Python collects extension dirs into a single `--load-extension=dir1,dir2` Chrome arg. Extensions auto-detected at startup if present.
+- **Transient dispatch**: `C-c` opens a transient menu (`embr-dispatch`). Top-level bindings shown via `C-c ?` (`embr-dispatch-keys`). Both are `transient-define-prefix` forms.
+- **kill-buffer-hook**: `embr--kill-buffer-cleanup` sends quit to the daemon when the buffer is killed by any means, preventing orphan processes.
+- **Shared init params**: `embr--build-init-params` builds the init command alist from defcustom values. Used by both `embr-browse` and `embr-browse-incognito`.
 
 ## Development Notes
 
-- No formal test suite exists. Testing is manual via interactive Emacs commands.
-- No linter/formatter configuration. Emacs Lisp follows GNU conventions; Python is PEP-ish.
-- `blocklist.txt` is in `.gitignore` — it's downloaded by `setup.sh`, not checked in.
-- Emacs 30.1+ required (native JSON parser). Python 3.10+ required.
+- No formal test suite. Testing is manual via interactive Emacs commands.
+- No linter/formatter config. Emacs Lisp follows GNU conventions; Python is PEP-ish.
+- `blocklist.txt` is in `.gitignore` -- downloaded by `setup.sh`, not checked in.
+- Emacs 30.1+ required (native JSON via `json-serialize`/`json-parse-string`). Python 3.10+ required.
 - Browser profile persists at `~/.local/share/embr/chromium-profile/`.
+- Extensions stored at `~/.local/share/embr/extensions/` (ublock/, darkreader/).
+- Incognito uses temp profile wiped on quit. Separate frame path (`embr-incognito-frame.jpg`) and perf log (`embr-incognito-perf.jsonl`).
 
 ## Git Policy
 
@@ -118,10 +147,18 @@ Full references:
 ## Working with the Code
 
 When modifying the JSON protocol (adding commands), both files must be updated:
-1. Add the command handler in `embr.py`'s `handle_command` function
+1. Add the command handler in `embr.py`'s `handle(cmd, params)` function
 2. Add the Emacs-side command and keybinding in `embr.el`
+3. Add the dispatch menu entry in the appropriate `transient-define-prefix`
 
-Keybindings are defined near the bottom of `embr.el` in `embr-mode-map`. Printable chars (32-126) are forwarded to the browser. Emacs-style motion keys (C-n/p/b/f) are translated to arrow key equivalents. Browser commands use the `C-c` prefix.
+Keybindings are defined near the bottom of `embr.el` in `embr-mode-map`. Printable chars (32-126) are forwarded to the browser. Emacs-style motion keys (C-n/p/b/f) are translated to arrow key equivalents. Browser commands use the `C-c` prefix via transient dispatch.
+
+When adding buffer-local state, follow the existing pattern:
+1. Add `(defvar embr--foo ...)` with the global default
+2. Add `(setq-local embr--foo ...)` in `embr-mode`
+3. Never read buffer-local vars inside `with-temp-buffer` -- capture them in a `let` first
+4. Timer callbacks must capture the owning buffer in a closure and use `with-current-buffer`
+5. Process/socket filters must route via `(process-get proc 'embr-buffer)`
 
 ## Keeping Docs in Sync
 

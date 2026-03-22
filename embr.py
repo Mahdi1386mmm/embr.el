@@ -824,7 +824,7 @@ else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
 
         if cmd == "navigate":
             url = params["url"]
-            if not url.startswith(("http://", "https://", "file://", "about:")):
+            if not url.startswith(("http://", "https://", "file://", "about:", "chrome://")):
                 url = "https://" + url
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=10000)
@@ -1049,7 +1049,7 @@ else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
                 await stop_screencast()
             new_page = await context.new_page()
             url = params.get("url", "about:blank")
-            if url != "about:blank" and not url.startswith(("http://", "https://", "file://")):
+            if url != "about:blank" and not url.startswith(("http://", "https://", "file://", "chrome://")):
                 url = "https://" + url
             if url != "about:blank":
                 await new_page.goto(url, wait_until="domcontentloaded", timeout=30000)

@@ -292,26 +292,24 @@ Checks that both the venv Python and the cloakbrowser package exist."
                (insert (format "\n%s\n" msg))))))))))
 
 ;;;###autoload
-(defun embr-setup-or-update-all ()
-  "Install or update CloakBrowser, ad blocklist, and uBlock Origin.
+(defun embr-install-or-update-cloakbrowser ()
+  "Install or update the Python venv and CloakBrowser binary."
+  (interactive)
+  (embr--run-setup '("--cloakbrowser") "Done. You can now run M-x embr-browse."))
+
+;;;###autoload
+(defun embr-install-or-update-blocklist ()
+  "Install or update the ad/tracker domain blocklist."
+  (interactive)
+  (embr--run-setup '("--blocklist") "Blocklist installed/updated."))
+
+;;;###autoload
+(defun embr-install-or-update-ublock ()
+  "Install or update uBlock Origin to the latest release.
 Note: uBlock Origin requires one-time manual setup in headed mode.
 See README.md for instructions."
   (interactive)
-  (embr--run-setup '("--all") "Done. You can now run M-x embr-browse."))
-
-;;;###autoload
-(defun embr-update-blocklist ()
-  "Update the ad/tracker domain blocklist."
-  (interactive)
-  (embr--run-setup '("--blocklist") "Blocklist updated."))
-
-;;;###autoload
-(defun embr-update-ublock ()
-  "Update uBlock Origin to the latest release.
-Note: uBlock Origin requires one-time manual setup in headed mode.
-See README.md for instructions."
-  (interactive)
-  (embr--run-setup '("--ublock") "uBlock Origin updated."))
+  (embr--run-setup '("--ublock") "uBlock Origin installed/updated."))
 
 ;;;###autoload
 (defun embr-install-or-update-darkreader ()
@@ -321,33 +319,100 @@ via chrome://extensions."
   (interactive)
   (embr--run-setup '("--darkreader") "Dark Reader installed/updated."))
 
+;; Safety measures for management delete operations:
+;;
+;; 1. Hardcoded defconst paths -- not derived from any runtime variable.
+;; 2. Sanity check on entry -- verifies the target string starts with the
+;;    hardcoded base before doing anything.
+;; 3. Per-path check -- every expanded path is re-verified to be inside
+;;    the allowed base before deletion, refuses with error if not.
+;; 4. Pure Elisp -- no shell subprocess.
+
+(defconst embr--data-dir-prefix
+  (expand-file-name "~/.local/share/embr/")
+  "Hardcoded base path for embr data deletion safety checks.")
+
+(defconst embr--browsers-dir
+  (expand-file-name "~/.cloakbrowser/")
+  "Hardcoded path to CloakBrowser's browser cache.")
+
+(defun embr--safe-delete (path allowed-prefix description)
+  "Delete PATH if it is inside ALLOWED-PREFIX.
+Verifies the expanded PATH starts with ALLOWED-PREFIX before
+deletion.  DESCRIPTION is used in messages."
+  (let ((expanded (expand-file-name path)))
+    (unless (string-prefix-p allowed-prefix expanded)
+      (error "embr: refusing to delete outside %s: %s"
+             allowed-prefix expanded))
+    (if (file-directory-p expanded)
+        (delete-directory expanded t)
+      (delete-file expanded))
+    (message "embr: %s removed" description)))
+
+;;;###autoload
+(defun embr-remove-ublock ()
+  "Remove uBlock Origin extension."
+  (interactive)
+  (let ((dir (expand-file-name "extensions/ublock/"
+                                embr--data-dir-prefix)))
+    (unless (string-prefix-p embr--data-dir-prefix dir)
+      (error "embr: path sanity check failed"))
+    (if (file-directory-p dir)
+        (when (y-or-n-p "Remove uBlock Origin? ")
+          (embr--safe-delete dir embr--data-dir-prefix "uBlock Origin"))
+      (message "embr: uBlock Origin not installed"))))
+
+;;;###autoload
+(defun embr-remove-darkreader ()
+  "Remove Dark Reader extension."
+  (interactive)
+  (let ((dir (expand-file-name "extensions/darkreader/"
+                                embr--data-dir-prefix)))
+    (unless (string-prefix-p embr--data-dir-prefix dir)
+      (error "embr: path sanity check failed"))
+    (if (file-directory-p dir)
+        (when (y-or-n-p "Remove Dark Reader? ")
+          (embr--safe-delete dir embr--data-dir-prefix "Dark Reader"))
+      (message "embr: Dark Reader not installed"))))
+
+;;;###autoload
+(defun embr-remove-blocklist ()
+  "Remove the ad/tracker domain blocklist."
+  (interactive)
+  (let ((file (expand-file-name "blocklist.txt"
+                                 embr--data-dir-prefix)))
+    (unless (string-prefix-p embr--data-dir-prefix file)
+      (error "embr: path sanity check failed"))
+    (if (file-exists-p file)
+        (when (y-or-n-p "Remove ad blocklist? ")
+          (embr--safe-delete file embr--data-dir-prefix "ad blocklist"))
+      (message "embr: blocklist not installed"))))
+
+(defvar embr--url-history)
+
 ;;;###autoload
 (defun embr-uninstall ()
-  "Remove the Python venv, CloakBrowser, and browser profile.
+  "Remove everything: venv, profile, extensions, browser cache.
+Deletes ~/.local/share/embr/ and ~/.cloakbrowser/ entirely.
 Does not remove the Emacs package itself."
   (interactive)
-  (let ((script (expand-file-name "uninstall.sh" embr--directory)))
-    (unless (file-exists-p script)
-      (error "embr: uninstall.sh not found in %s" embr--directory))
-    (let ((buf (get-buffer-create "*embr-setup*")))
-      (with-current-buffer buf (erase-buffer))
-      (pop-to-buffer buf)
-      (insert (format "Running uninstall.sh in %s ...\n\n" embr--directory))
-      ;; Run with yes piped to stdin to auto-confirm (user already confirmed via M-x).
-      (when (y-or-n-p "Remove Python venv and browser profile? ")
-        (let* ((also-browsers (y-or-n-p "Also delete CloakBrowser's browser cache (~/.cloakbrowser)? "))
-               (input (concat "y\n" (if also-browsers "y\n" "n\n")))
-               (proc (start-process "embr-uninstall" buf "bash" "-c"
-                                     (format "echo %s | bash %s"
-                                             (shell-quote-argument input)
-                                             (shell-quote-argument script)))))
-          (set-process-sentinel
-           proc
-           (lambda (_proc event)
-             (when (string-match-p "finished" event)
-               (with-current-buffer (get-buffer "*embr-setup*")
-                 (goto-char (point-max))
-                 (insert "\nDone.\n"))))))))))
+  (unless (and (stringp embr--data-dir-prefix)
+               (string-prefix-p (expand-file-name "~/.local/share/embr/")
+                                embr--data-dir-prefix))
+    (error "embr: data dir sanity check failed"))
+  (unless (and (stringp embr--browsers-dir)
+               (string-prefix-p (expand-file-name "~/.cloakbrowser/")
+                                embr--browsers-dir))
+    (error "embr: browsers dir sanity check failed"))
+  (when (yes-or-no-p
+         "Remove ALL embr data (~/.local/share/embr/ and ~/.cloakbrowser/)? ")
+    (when (file-directory-p embr--data-dir-prefix)
+      (delete-directory embr--data-dir-prefix t))
+    (when (file-directory-p embr--browsers-dir)
+      (delete-directory embr--browsers-dir t))
+    (setq embr--url-history nil)
+    (message "embr: removed %s and %s"
+             embr--data-dir-prefix embr--browsers-dir)))
 
 ;;;###autoload
 (defun embr-info ()
@@ -355,7 +420,10 @@ Does not remove the Emacs package itself."
   (interactive)
   (let ((venv-dir (expand-file-name ".venv" embr--data-dir))
         (browsers-dir (expand-file-name ".cloakbrowser" "~"))
-        (profile-dir (expand-file-name "chromium-profile" embr--data-dir)))
+        (profile-dir (expand-file-name "chromium-profile" embr--data-dir))
+        (blocklist (expand-file-name "blocklist.txt" embr--data-dir))
+        (ublock-dir (expand-file-name "extensions/ublock" embr--data-dir))
+        (darkreader-dir (expand-file-name "extensions/darkreader" embr--data-dir)))
     (message "embr installation:
   Source:     %s
   Python:     %s (%s)
@@ -363,6 +431,9 @@ Does not remove the Emacs package itself."
   Venv:       %s (%s)
   Browsers:   %s (%s)
   Profile:    %s (%s)
+  Blocklist:  %s
+  uBlock:     %s
+  Dark Reader:%s
   Setup needed: %s"
              embr--directory
              embr-python (if (file-exists-p embr-python) "OK" "MISSING")
@@ -370,7 +441,10 @@ Does not remove the Emacs package itself."
              venv-dir (if (file-directory-p venv-dir) "OK" "MISSING")
              browsers-dir (if (file-directory-p browsers-dir) "OK" "MISSING")
              profile-dir (if (file-directory-p profile-dir) "exists" "not yet created")
-             (embr--setup-needed-p))))
+             (if (file-exists-p blocklist) "installed" "not installed")
+             (if (file-directory-p ublock-dir) "installed" "not installed")
+             (if (file-directory-p darkreader-dir) "installed" "not installed")
+             (if (embr--setup-needed-p) "yes" "no"))))
 
 ;; ── Internal state ─────────────────────────────────────────────────
 
@@ -829,6 +903,7 @@ Dispatch to the active backend for display, then update metadata."
   "If INPUT looks like a URL, return it as-is; otherwise build a search URL."
   (if (or (string-match-p "\\`https?://" input)
           (string-match-p "\\`file://" input)
+          (string-match-p "\\`chrome://" input)
           (and (string-match-p "\\." input)
                (not (string-match-p " " input))))
       input
@@ -933,6 +1008,12 @@ Reads the History SQLite database directly.  Requires sqlite3 on PATH."
                       (embr--send `((cmd . "navigate") (url . ,url))
                                   #'embr--action-callback)))))))
         (delete-file tmp))))))
+
+(defun embr-download-history ()
+  "Navigate to chrome://downloads."
+  (interactive)
+  (embr--send '((cmd . "navigate") (url . "chrome://downloads"))
+              #'embr--action-callback))
 
 (defun embr-quit ()
   "Kill the daemon and close the buffer."
@@ -1248,21 +1329,37 @@ BUF is the embr buffer that owns this timer."
                           (message "embr: %s" err)
                         (message "Saved: %s" (alist-get 'path resp)))))))))
 
+(defun embr-download-url (url)
+  "Download URL directly by entering it in the minibuffer."
+  (interactive "sDownload URL: ")
+  (unless (string-empty-p url)
+    (let ((dir (expand-file-name embr-download-directory)))
+      (embr--send `((cmd . "download")
+                    (url . ,url)
+                    (directory . ,dir))
+                  (lambda (resp)
+                    (if-let* ((err (alist-get 'error resp)))
+                        (message "embr: %s" err)
+                      (message "Saved: %s" (alist-get 'path resp))))))))
+
 (defun embr-download ()
   "Download the link under the mouse cursor.
-If the mouse is not over a link, fall back to hint selection."
+If the mouse is not over a link, fall back to hint selection.
+With prefix argument, prompt for a URL instead."
   (interactive)
-  (let ((coords (embr--mouse-image-coords)))
-    (if (null coords)
-        (embr--download-via-hints)
-      (embr--send `((cmd . "link-at-point")
-                    (x . ,(car coords))
-                    (y . ,(cdr coords)))
-                  (lambda (resp)
-                    (let ((href (alist-get 'href resp)))
-                      (if href
-                          (embr--download-url href)
-                        (embr--download-via-hints))))))))
+  (if current-prefix-arg
+      (call-interactively #'embr-download-url)
+    (let ((coords (embr--mouse-image-coords)))
+      (if (null coords)
+          (embr--download-via-hints)
+        (embr--send `((cmd . "link-at-point")
+                      (x . ,(car coords))
+                      (y . ,(cdr coords)))
+                    (lambda (resp)
+                      (let ((href (alist-get 'href resp)))
+                        (if href
+                            (embr--download-url href)
+                          (embr--download-via-hints)))))))))
 
 (defun embr--download-via-hints ()
   "Show link hints, then download the chosen link."
@@ -1704,7 +1801,7 @@ If the mouse is not over a link, fall back to hint selection."
   "Launch an incognito embr session and navigate to URL."
   (interactive "sURL: ")
   (when (embr--setup-needed-p)
-    (error "embr: Run M-x embr-setup-or-update-all first"))
+    (error "embr: Run M-x embr-install-or-update-cloakbrowser first"))
   ;; Create buffer.
   (unless (buffer-live-p embr--incognito-buffer)
     (setq embr--incognito-buffer (generate-new-buffer "*embr incognito*"))
@@ -1925,6 +2022,57 @@ DESCRIPTION is shown in the prompt."
     (setq embr--url-history nil)
     (message "embr: chromium profile deleted, URL history cleared")))
 
+(defun embr--chrome-navigate (url)
+  "Navigate to chrome:// URL."
+  (embr--send `((cmd . "navigate") (url . ,url))
+              #'embr--action-callback))
+
+(defun embr-chrome-settings ()
+  "Open chrome://settings."
+  (interactive)
+  (embr--chrome-navigate "chrome://settings"))
+
+(defun embr-chrome-extensions ()
+  "Open chrome://extensions."
+  (interactive)
+  (embr--chrome-navigate "chrome://extensions"))
+
+(defun embr-chrome-flags ()
+  "Open chrome://flags."
+  (interactive)
+  (embr--chrome-navigate "chrome://flags"))
+
+(defun embr-chrome-downloads ()
+  "Open chrome://downloads."
+  (interactive)
+  (embr--chrome-navigate "chrome://downloads"))
+
+(defun embr-chrome-history ()
+  "Open chrome://history."
+  (interactive)
+  (embr--chrome-navigate "chrome://history"))
+
+(defun embr-chrome-gpu ()
+  "Open chrome://gpu."
+  (interactive)
+  (embr--chrome-navigate "chrome://gpu"))
+
+(transient-define-prefix embr-dispatch-chrome ()
+  "Show chrome:// internal pages."
+  ["Chrome Internals\
+\nWarning: CloakBrowser patches Chromium heavily, so settings may be\
+\ngrayed out or have no effect.  Switching to 'headed mode may help for\
+\nsome pages.  For extension management, see README FAQ.  CloakBrowser\
+\nis configured to be performant and private out of the box, so\
+\nhopefully no serious tweaks needed :)"
+   ("s" "Settings" embr-chrome-settings)
+   ("e" "Extensions" embr-chrome-extensions)
+   ("f" "Flags" embr-chrome-flags)
+   ("d" "Downloads" embr-chrome-downloads)
+   ("h" "History" embr-chrome-history)
+   ("g" "GPU" embr-chrome-gpu)
+   ("q" "Close menu" embr-dispatch-close)])
+
 (defun embr-dispatch-close ()
   "Close the dispatch menu."
   (interactive))
@@ -1935,7 +2083,8 @@ DESCRIPTION is shown in the prompt."
     ("g" "Reload" embr-refresh)
     ("l" "Back" embr-back)
     ("r" "Forward" embr-forward)
-    ("h" "History" embr-history-persistent)]
+    ("h" "History" embr-history-persistent)
+    ("H" "Download history" embr-download-history)]
    ["Tabs"
     ("c" "New" embr-new-tab)
     ("x" "Close" embr-close-tab)
@@ -1953,6 +2102,7 @@ DESCRIPTION is shown in the prompt."
     ("w" "Copy URL" embr-copy-url)
     ("y" "Copy link" embr-copy-link)
     ("d" "Download" embr-download)
+    ("D" "Download URL" embr-download-url)
     (":" "Execute JS" embr-execute-js)]
    ["Export"
     ("i" "Print PDF" embr-print-pdf)
@@ -1972,6 +2122,7 @@ DESCRIPTION is shown in the prompt."
    ["Other"
     ("k" "Kill embr" embr-quit)
     ("q" "Close menu" embr-dispatch-close)
+    ("z" "Chrome internals" embr-dispatch-chrome)
     ("?" "Top-level bindkeys" embr-dispatch-keys)]])
 
 ;; ── Keymap ─────────────────────────────────────────────────────────
@@ -2134,9 +2285,9 @@ If the daemon is already running, just navigate to the new URL."
   (when (embr--setup-needed-p)
     (if (y-or-n-p "embr: Setup needed (venv or CloakBrowser missing). Run now? ")
         (progn
-          (embr-setup-or-update-all)
+          (embr-install-or-update-cloakbrowser)
           (error "embr: Setup started in *embr-setup* buffer. Run M-x embr-browse again when it finishes"))
-      (error "embr: Run M-x embr-setup-or-update-all first")))
+      (error "embr: Run M-x embr-install-or-update-cloakbrowser first")))
   ;; Create buffer if needed.
   (unless (buffer-live-p embr--normal-buffer)
     (setq embr--normal-buffer (generate-new-buffer "*embr*"))

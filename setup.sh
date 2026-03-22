@@ -5,7 +5,7 @@ DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/embr"
 VENV_DIR="$DATA_DIR/.venv"
 TMP_VENV="$DATA_DIR/.venv.tmp"
 
-MODE="${1:---all}"
+MODE="${1:---cloakbrowser}"
 
 mkdir -p "$DATA_DIR"
 
@@ -87,10 +87,8 @@ do_darkreader() {
 }
 
 case "$MODE" in
-    --all)
+    --cloakbrowser)
         do_venv
-        do_blocklist
-        do_ublock
         ;;
     --blocklist)
         do_blocklist
@@ -102,7 +100,7 @@ case "$MODE" in
         do_darkreader
         ;;
     *)
-        echo "Usage: setup.sh [--all|--blocklist|--ublock|--darkreader]" >&2
+        echo "Usage: setup.sh [--cloakbrowser|--blocklist|--ublock|--darkreader]" >&2
         exit 1
         ;;
 esac
