@@ -323,3 +323,7 @@ Chromium extensions do not auto-update in CloakBrowser. See how `setup.sh` keeps
 ### Why not just use EXWM?
 
 EXWM is X11 only. There is also an experimental Wayland equivalent in the same spirit. embr takes a different approach: it does not turn Emacs into a window manager and works on any desktop environment, Wayland or Xorg. That said, this is just another option. Use whatever works for you.
+
+### Credits
+
+Screenshots use [moody](https://github.com/tarsius/moody) for the mode line, [Aporetic Sans Mono](https://github.com/protesilaos/aporetic) for the font, and the [ef-dream](https://github.com/protesilaos/ef-themes) theme.
