@@ -188,7 +188,7 @@ To disable an extension temporarily, switch to `'headed` mode and visit `chrome:
 
 ## Password Manager
 
-`embr-passwd.el` is a local GPG-encrypted password vault. Credentials are stored in a JSON file encrypted with your GPG key.
+`embr-passwd.el` is a local password manager. GPG-encrypted vault, pwgen for generation.
 
 ### Setup
 
@@ -226,6 +226,7 @@ Need to register on a site? Run `M-x embr-passwd-add` first. Enter the site name
 | `embr-passwd-encrypt-to` | nil | GPG key ID (required) |
 | `embr-passwd-file` | `~/Documents/passwd.json.gpg` | Vault file location |
 | `embr-passwd-length` | 12 | Generated password length |
+| `embr-passwd-pwgen-args` | `"-ycn"` | Arguments passed to pwgen |
 
 Requires `pwgen` for password generation.
 

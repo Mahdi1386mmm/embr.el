@@ -45,6 +45,11 @@ Must be set before using any `embr-passwd' commands."
   :type 'integer
   :group 'embr-passwd)
 
+(defcustom embr-passwd-pwgen-args "-ycn"
+  "Arguments passed to pwgen before the length."
+  :type 'string
+  :group 'embr-passwd)
+
 (defcustom embr-passwd-file
   (expand-file-name "passwd.json.gpg" "~/Documents")
   "Path to the GPG-encrypted password vault file."
@@ -156,7 +161,7 @@ Give your own key ultimate trust: gpg --edit-key KEYID trust (select 5)."
                (user-error "pwgen not found; install it first"))
              (setq pw (string-trim
                        (shell-command-to-string
-                        (format "pwgen -ycn %d 1" embr-passwd-length))))
+                        (format "pwgen %s %d 1" embr-passwd-pwgen-args embr-passwd-length))))
              (kill-new pw)
              (message "Generated password copied to kill ring"))
            pw)
@@ -194,8 +199,11 @@ Give your own key ultimate trust: gpg --edit-key KEYID trust (select 5)."
                               :test #'string=)))
     (if (= (length entries) (length filtered))
         (message "No entry found for \"%s\"" site)
-      (embr-passwd--write filtered)
-      (message "Removed entry for \"%s\"" site))))
+      (if (y-or-n-p (format "Remove \"%s\"? " site))
+          (progn
+            (embr-passwd--write filtered)
+            (message "Removed entry for \"%s\"" site))
+        (message "Cancelled")))))
 
 ;;;###autoload
 (defun embr-passwd-list ()
@@ -237,7 +245,7 @@ Password length is controlled by `embr-passwd-length'."
     (user-error "pwgen not found; install it first"))
   (let ((pw (string-trim
              (shell-command-to-string
-              (format "pwgen -ycn %d 1" embr-passwd-length)))))
+              (format "pwgen %s %d 1" embr-passwd-pwgen-args embr-passwd-length)))))
     (kill-new pw)
     (message "Generated password copied to kill ring")))
 
