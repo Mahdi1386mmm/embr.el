@@ -81,6 +81,29 @@ Emacs is the display server. Headless Chromium via [CloakBrowser](https://cloakb
 (set-frame-size nil 150 40)
 ```
 
+**For the fully converted (lol):** If you add `(unless (server-running-p) (server-start))` to your init.el and drop this script in e.g. `/usr/local/bin/chromium`:
+
+```sh
+#!/bin/sh
+if emacsclient --eval "t" >/dev/null 2>&1; then
+    emacsclient --eval "(embr-browse \"$@\")"
+else
+    emacs --eval "(embr-browse \"$@\")" &
+fi
+```
+
+then any CLI call like `chromium example.com` goes straight to embr — in your existing Emacs frame if it's running, or a fresh one if it's not. To make it the system default browser (so KDE, GNOME, xdg-open, etc. use it), save this as `~/.local/share/applications/embr.desktop`:
+
+```ini
+[Desktop Entry]
+Name=embr
+Exec=/usr/local/bin/chromium %u
+Type=Application
+MimeType=x-scheme-handler/http;x-scheme-handler/https;
+```
+
+Then run `xdg-settings set default-web-browser embr.desktop`.
+
 ## Setup
 
 After installing, run `M-x embr-install-or-update-cloakbrowser` to create the Python venv and download CloakBrowser. This is the only required step. If you skip it, `M-x embr-browse` will offer to run it for you.
