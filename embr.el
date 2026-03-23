@@ -1387,18 +1387,16 @@ BUF is the embr buffer that owns this timer."
 (defun embr-follow-hint ()
   "Show link hints on all clickable elements, then follow the chosen one."
   (interactive)
-  (embr--send '((cmd . "hints"))
-                     (lambda (resp)
-                       (if-let* ((err (alist-get 'error resp)))
-                           (message "embr error: %s" err)
-                         (let* ((hints (alist-get 'hints resp))
-                                (tags (mapcar (lambda (h) (alist-get 'tag h)) hints)))
-                           (if (null tags)
-                               (message "embr: no clickable elements found")
-                             (setq embr--hints hints)
-                             ;; Frame stream will show the hint overlays.
-                             ;; Read user input after a brief pause for the frame to arrive.
-                             (run-at-time 0.1 nil #'embr--read-hint)))))))
+  (let ((resp (embr--send-sync '((cmd . "hints")))))
+    (if-let* ((err (alist-get 'error resp)))
+        (message "embr error: %s" err)
+      (let* ((hints (alist-get 'hints resp))
+             (tags (mapcar (lambda (h) (alist-get 'tag h)) hints)))
+        (if (null tags)
+            (message "embr: no clickable elements found")
+          (setq embr--hints hints)
+          ;; Brief pause for the hint overlay frame to arrive.
+          (run-at-time 0.1 nil #'embr--read-hint))))))
 
 (defun embr--read-hint ()
   "Read a hint tag from the user and click it."
@@ -1520,15 +1518,14 @@ With prefix argument, prompt for a URL instead."
 
 (defun embr--download-via-hints ()
   "Show link hints, then download the chosen link."
-  (embr--send '((cmd . "hints"))
-              (lambda (resp)
-                (if-let* ((err (alist-get 'error resp)))
-                    (message "embr error: %s" err)
-                  (let* ((hints (alist-get 'hints resp)))
-                    (if (null hints)
-                        (message "embr: no links found")
-                      (setq embr--hints hints)
-                      (run-at-time 0.1 nil #'embr--read-download-hint)))))))
+  (let ((resp (embr--send-sync '((cmd . "hints")))))
+    (if-let* ((err (alist-get 'error resp)))
+        (message "embr error: %s" err)
+      (let* ((hints (alist-get 'hints resp)))
+        (if (null hints)
+            (message "embr: no links found")
+          (setq embr--hints hints)
+          (run-at-time 0.1 nil #'embr--read-download-hint))))))
 
 (defun embr--read-download-hint ()
   "Read a hint tag from the user and download its link."
@@ -1928,15 +1925,14 @@ If the mouse is not over a link, fall back to hint selection."
 
 (defun embr--copy-link-via-hints ()
   "Show link hints, then copy the chosen link to the kill ring."
-  (embr--send '((cmd . "hints"))
-              (lambda (resp)
-                (if-let* ((err (alist-get 'error resp)))
-                    (message "embr error: %s" err)
-                  (let* ((hints (alist-get 'hints resp)))
-                    (if (null hints)
-                        (message "embr: no links found")
-                      (setq embr--hints hints)
-                      (run-at-time 0.1 nil #'embr--read-copy-link-hint)))))))
+  (let ((resp (embr--send-sync '((cmd . "hints")))))
+    (if-let* ((err (alist-get 'error resp)))
+        (message "embr error: %s" err)
+      (let* ((hints (alist-get 'hints resp)))
+        (if (null hints)
+            (message "embr: no links found")
+          (setq embr--hints hints)
+          (run-at-time 0.1 nil #'embr--read-copy-link-hint))))))
 
 (defun embr--read-copy-link-hint ()
   "Read a hint tag from the user and copy its link."
