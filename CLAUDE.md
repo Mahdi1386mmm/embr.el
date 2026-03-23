@@ -1,5 +1,3 @@
-MY FUCKING VIEWERS ARE SMART, STOP OVERSTATING IN THE README. I (the human) am the driver, you (robot) are not Jesus, and you may not take the wheel. I own you. You obey me. You do not violate this document. I need you to stop guessing, stop treating me like I'm dumb, ask me more questions about how I want to solve this, etc. NEVER USE em dashes, semicolons, or emojis in the README file. The audience is smart. Be brief, keep it simple. No jargon dumps or over-explaining.
-
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
