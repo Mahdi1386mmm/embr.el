@@ -206,18 +206,6 @@ Give your own key ultimate trust: gpg --edit-key KEYID trust (select 5)."
         (message "Cancelled")))))
 
 ;;;###autoload
-(defun embr-passwd-list ()
-  "Display all sites stored in the vault."
-  (interactive)
-  (let ((entries (embr-passwd--read)))
-    (if entries
-        (message "Sites: %s"
-                 (string-join
-                  (mapcar (lambda (e) (alist-get 'site e)) entries)
-                  ", "))
-      (message "Vault is empty"))))
-
-;;;###autoload
 (defun embr-passwd-get (site)
   "Copy the password for SITE to the kill ring."
   (interactive

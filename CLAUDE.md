@@ -161,5 +161,5 @@ When adding buffer-local state, follow the existing pattern:
 ## Keeping Docs in Sync
 
 - **README.md `use-package` blocks**: The example configs show only commonly-tuned settings (e.g. color scheme, search engine, display method) — not every `defcustom`. Keep them minimal and representative.
-- **README.md Configuration table**: All `defcustom` variables with their defaults must appear here. When adding, removing, renaming, or changing a default, update this table.
+- **README.md Configuration table**: Only user-tunable `defcustom` variables belong here — settings a user would adjust to improve their experience (viewport size, color scheme, hover rate, etc.). Omit internal plumbing (venv paths, script paths, installer-tied defaults) and deprecated variables. Exposing either invites misconfiguration; experts will find them via `describe-variable` anyway. When adding, removing, renaming, or changing a default for a user-tunable variable, update this table.
 - **README.md Keybindings tables**: After any keybinding change (add/remove/rebind), update the corresponding tables.

@@ -113,8 +113,6 @@ All management is done from Emacs, no terminal needed. `setup.sh` builds in a te
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `embr-python` | file | `~/.local/share/embr/.venv/bin/python` | Path to Python interpreter in the embr venv. |
-| `embr-script` | file | `embr.py` in package dir | Path to the embr.py daemon script. |
 | `embr-hover-rate` | integer | `30` | Mouse hover tracking rate in Hz. Higher values (e.g. 60) give lower-latency hover and can help with finicky buttons. Lower values (e.g. 20) reduce CDP traffic and may improve click reliability on slower machines. Setting this too high risks input lockups. |
 | `embr-default-width` | integer | `1280` | Viewport width in pixels |
 | `embr-default-height` | integer | `720` | Viewport height in pixels |
@@ -221,7 +219,6 @@ Need to register on a site? Run `M-x embr-passwd-add` first. Enter the site name
 | `embr-passwd-add` | Add site/login/password/notes (empty password generates one) |
 | `embr-passwd-remove` | Remove entry by site |
 | `embr-passwd-get` | Copy password for a site to kill ring |
-| `embr-passwd-list` | Show all sites in the vault |
 | `embr-passwd-generate` | Generate a password and copy to kill ring |
 | `embr-passwd-inject` | Fill login/password fields on the current page |
 
