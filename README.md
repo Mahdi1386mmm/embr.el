@@ -102,6 +102,8 @@ Type=Application
 MimeType=x-scheme-handler/http;x-scheme-handler/https;
 ```
 
+Then uninstall your system Chromium and set this one as default: `xdg-settings set default-web-browser chromium.desktop`.
+
 ## Setup
 
 After installing, run `M-x embr-install-or-update-cloakbrowser` to create the Python venv and download CloakBrowser. This is the only required step. If you skip it, `M-x embr-browse` will offer to run it for you.
