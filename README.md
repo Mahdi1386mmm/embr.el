@@ -193,7 +193,7 @@ To disable an extension temporarily, switch to `'headed` mode and visit `chrome:
 ### Setup
 
 1. [Generate a GPG key](https://docs.github.com/en/authentication/managing-commit-signature-verification/generating-a-new-gpg-key) if you do not have one. Give it ultimate trust: `gpg --edit-key KEYID trust` (select 5).
-2. Set your key ID and run init:
+2. Find your key ID with `gpg --list-keys --keyid-format short`. Set it and run init:
 
 ```elisp
 (setq embr-passwd-encrypt-to "YOUR_GPG_KEY_ID")
