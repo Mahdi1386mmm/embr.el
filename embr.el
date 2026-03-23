@@ -627,6 +627,8 @@ Respects `embr-display-method' for display modes."
                         ;; Screencast error notification — always show to user.
                         (message "embr: %s" (alist-get 'screencast_error resp)))
                        (t
+                        ;; Update tab bar if response includes tabs.
+                        (embr--update-tab-list-from-resp resp)
                         ;; Command response — dispatch to callback.
                         (when embr--callback
                           (let ((cb embr--callback))
