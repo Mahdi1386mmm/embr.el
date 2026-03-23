@@ -91,7 +91,9 @@ realistic browser fingerprint."
   :type 'integer)
 
 (defcustom embr-jpeg-quality 80
-  "Deprecated. Screenshot-only. JPEG quality (1-100) for screenshot captures."
+  "JPEG quality (1-100) for frame captures.
+Used by both screencast and screenshot frame sources.
+Lower values encode faster but degrade image quality."
   :type 'integer)
 
 (defcustom embr-hover-rate 30
@@ -2836,8 +2838,12 @@ Lisp with a URL argument, navigate to that URL."
           ;; Restore session or navigate before starting frames.
           (let ((restored (embr--restore-session)))
             (if restored
-                (message "embr: session restored (%d tab%s)"
-                         restored (if (= restored 1) "" "s"))
+                (progn
+                  (message "embr: session restored (%d tab%s)"
+                           restored (if (= restored 1) "" "s"))
+                  (when url
+                    (embr--send-sync
+                     `((cmd . "new-tab") (url . ,url)))))
               (embr--send-sync
                `((cmd . "navigate")
                  (url . ,(or url embr-home-url))))))
@@ -2854,7 +2860,10 @@ Lisp with a URL argument, navigate to that URL."
            (alist-get 'frame_socket_path resp))
           (message "embr: %s transport, %s backend"
                    (or (alist-get 'frame_source resp) "unknown")
-                   (embr--backend-name))))))
+                   (embr--backend-name)))))
+    ;; Daemon already running — open URL in a new tab.
+    (when url
+      (embr--send-sync `((cmd . "new-tab") (url . ,url)))))
   (switch-to-buffer embr--normal-buffer))
 
 (provide 'embr)

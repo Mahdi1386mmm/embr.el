@@ -130,6 +130,7 @@ All management is done from Emacs, no terminal needed. `setup.sh` builds in a te
 | `embr-hover-move-threshold-px` | integer | `0` | Minimum pixel distance before sending a hover update. Filters sub-pixel jitter. |
 | `embr-external-command` | string | `yt-dlp -o - %s \| mpv -` | Shell command for `&` key (`%s` = URL). |
 | `embr-download-directory` | directory | `~/Downloads/` | Directory where downloaded files are saved. |
+| `embr-jpeg-quality` | integer | `80` | JPEG quality (1-100) for frame captures. Used by both screencast and screenshot. Lower values encode faster but degrade image quality. |
 | `embr-frame-source` | symbol | `'screencast` | `'screencast` uses CDP screencast (recommended). `'screenshot` uses polling only. |
 | `embr-render-backend` | symbol | `'default` | `'default` uses JPEG file + create-image. `'canvas` requires canvas-patched Emacs. |
 | `embr-display-method` | symbol | `'headless` | `'headless`, `'headed` (requires Xvfb), `'headed-offscreen` (requires Xvfb). |
