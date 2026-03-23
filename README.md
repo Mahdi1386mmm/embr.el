@@ -192,6 +192,8 @@ To disable an extension temporarily, switch to `'headed` mode and visit `chrome:
 
 ## Password Manager
 
+![embr-passwd demo](assets/Screencast_20260323_091912.gif)
+
 `embr-passwd.el` is a local password manager. GPG-encrypted vault, pwgen for generation.
 
 ### Setup
@@ -207,7 +209,7 @@ To disable an extension temporarily, switch to `'headed` mode and visit `chrome:
 
 ### Workflow
 
-Need to register on a site? Run `M-x embr-passwd-add` first. Enter the site name, your username or email, and leave the password blank to auto-generate one. Then `M-x embr-passwd-inject` to interactively fill the signup form: pick the entry you just created, focus each field, press `C-j` to fill it. All embr navigation works while selecting fields (click, tab, `C-c f` hints).
+Need to register on a site? Run `M-x embr-passwd-add` first. Enter the site name, username and/or email, and leave the password blank to auto-generate one. Then `M-x embr-passwd-inject` to interactively fill the signup form: pick the entry you just created, focus each field, press `C-j` to fill it. All embr navigation works while selecting fields (click, tab, `C-c f` hints).
 
 `M-x embr-passwd-generate` is also available standalone if you just need a password on the clipboard.
 
@@ -216,7 +218,7 @@ Need to register on a site? Run `M-x embr-passwd-add` first. Enter the site name
 | Command | Description |
 |---------|-------------|
 | `embr-passwd-init` | Create empty vault |
-| `embr-passwd-add` | Add site/login/password/notes (empty password generates one) |
+| `embr-passwd-add` | Add site/username/email/password/notes (fields optional except site and password; empty password generates one) |
 | `embr-passwd-remove` | Remove entry by site |
 | `embr-passwd-get` | Copy password for a site to kill ring |
 | `embr-passwd-generate` | Generate a password and copy to kill ring |

@@ -73,7 +73,8 @@ Must be set before using any `embr-passwd' commands."
 
 (defun embr-passwd--read ()
   "Read the password vault and return a list of entries.
-Each entry is an alist with `login' and `password' keys.
+Each entry is an alist with `site', `password', and optional
+`username', `email', and `notes' keys.
 Return nil if the vault is empty."
   (embr-passwd--ensure-key)
   (unless (file-exists-p embr-passwd-file)
@@ -98,7 +99,8 @@ Return nil if the vault is empty."
 
 (defun embr-passwd--write (entries)
   "Write ENTRIES to the password vault.
-ENTRIES is a list of alists with `login' and `password' keys."
+ENTRIES is a list of alists with `site', `password', and optional
+`username', `email', and `notes' keys."
   (embr-passwd--ensure-key)
   (let* ((context (epg-make-context))
          (plain (if entries
@@ -150,11 +152,15 @@ Give your own key ultimate trust: gpg --edit-key KEYID trust (select 5)."
     (message "Created empty vault at %s" embr-passwd-file)))
 
 ;;;###autoload
-(defun embr-passwd-add (site login password &optional notes)
-  "Add an entry for SITE with LOGIN, PASSWORD, and optional NOTES."
+(defun embr-passwd-add (site username email password &optional notes)
+  "Add an entry for SITE with USERNAME, EMAIL, PASSWORD, and optional NOTES.
+USERNAME and EMAIL are each optional; supply at least one."
   (interactive
    (list (read-string "Site: ")
-         (read-string "Login (username or email): ")
+         (let ((u (read-string "Username (optional): ")))
+           (unless (string-empty-p u) u))
+         (let ((e (read-string "Email (optional): ")))
+           (unless (string-empty-p e) e))
          (let ((pw (read-passwd "Password (empty to generate): ")))
            (when (string-empty-p pw)
              (unless (executable-find "pwgen")
@@ -169,8 +175,6 @@ Give your own key ultimate trust: gpg --edit-key KEYID trust (select 5)."
            (unless (string-empty-p n) n))))
   (when (string-empty-p site)
     (user-error "Site cannot be empty"))
-  (when (string-empty-p login)
-    (user-error "Login cannot be empty"))
   (when (string-empty-p password)
     (user-error "Password cannot be empty"))
   (let ((entries (embr-passwd--read)))
@@ -178,8 +182,11 @@ Give your own key ultimate trust: gpg --edit-key KEYID trust (select 5)."
                    :key (lambda (e) (alist-get 'site e))
                    :test #'string=)
       (user-error "Entry for \"%s\" already exists; remove it first" site))
-    (push `((site . ,site) (login . ,login) (password . ,password)
-            ,@(when notes `((notes . ,notes))))
+    (push `((site . ,site)
+            ,@(when username `((username . ,username)))
+            ,@(when email    `((email    . ,email)))
+            (password . ,password)
+            ,@(when notes    `((notes    . ,notes))))
           entries)
     (embr-passwd--write entries)
     (message "Added entry for \"%s\"" site)))
@@ -269,25 +276,34 @@ Return when RET is pressed.  All other input is dispatched normally."
 
 ;;;###autoload
 (defun embr-passwd-inject ()
-  "Fill login and password fields on the current page from the vault.
-Click the login field, then the password field when prompted."
+  "Fill credential fields on the current page from the vault.
+For each field present in the entry (username, email, password),
+prompt the user to select the target field, then fill it."
   (interactive)
   (let* ((entries (embr-passwd--read))
          (_ (unless entries (user-error "Vault is empty")))
          (labels (mapcar (lambda (e)
-                           (format "%s -- %s"
-                                   (alist-get 'site e)
-                                   (alist-get 'login e)))
+                           (let* ((u  (alist-get 'username e))
+                                  (em (alist-get 'email e))
+                                  (id (cond ((and u em) (format "%s / %s" u em))
+                                            (u u) (em em) (t "?"))))
+                             (format "%s -- %s" (alist-get 'site e) id)))
                          entries))
          (chosen (completing-read "Credentials: " labels nil t))
          (entry (nth (cl-position chosen labels :test #'string=)
-                     entries)))
-    (embr-passwd--wait-for-confirm "Select the login field, press C-j to fill")
-    (embr--send-sync `((cmd . "type-text")
-                       (value . ,(alist-get 'login entry))))
-    (embr-passwd--wait-for-confirm "Select the password field, press C-j to fill")
-    (embr--send-sync `((cmd . "type-text")
-                       (value . ,(alist-get 'password entry))))
+                     entries))
+         (steps `(,@(when (alist-get 'username entry)
+                      `(("Select the username field, press C-j to fill"
+                         . ,(alist-get 'username entry))))
+                  ,@(when (alist-get 'email entry)
+                      `(("Select the email field, press C-j to fill"
+                         . ,(alist-get 'email entry))))
+                  ,@(when (alist-get 'password entry)
+                      `(("Select the password field, press C-j to fill"
+                         . ,(alist-get 'password entry)))))))
+    (dolist (step steps)
+      (embr-passwd--wait-for-confirm (car step))
+      (embr--send-sync `((cmd . "type-text") (value . ,(cdr step)))))
     (message "Filled credentials for \"%s\"" (alist-get 'site entry))))
 
 (provide 'embr-passwd)
