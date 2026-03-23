@@ -620,6 +620,7 @@ async def main():
                       clientX: x, clientY: y, button: 0};
         for (const t of ['pointerdown','mousedown','pointerup','mouseup','click'])
             el.dispatchEvent(new MouseEvent(t, opts));
+        el.focus();
     }"""
 
     async def handle(cmd, params):
@@ -1099,6 +1100,26 @@ else document.addEventListener('DOMContentLoaded', embrStartLinkStatus);
         if cmd == "source":
             html = await page.content()
             return {"ok": True, "html": html}
+
+        if cmd == "type-text":
+            await page.keyboard.type(params["value"])
+            return {"ok": True}
+
+        if cmd == "overlay":
+            text = params.get("text", "")
+            show = params.get("show", True)
+            await page.evaluate("""([text, show]) => {
+                let el = document.getElementById('__embr_overlay');
+                if (!show) { if (el) el.remove(); return; }
+                if (!el) {
+                    el = document.createElement('div');
+                    el.id = '__embr_overlay';
+                    el.style.cssText = 'position:fixed;z-index:2147483647;top:0;left:0;right:0;padding:18px;font:bold 22px/28px sans-serif;color:#fff;background:rgba(0,0,0,0.8);text-align:center;pointer-events:none;';
+                    document.body.appendChild(el);
+                }
+                el.textContent = text;
+            }""", [text, show])
+            return {"ok": True}
 
         if cmd == "fill":
             await page.fill(params["selector"], params["value"])

@@ -7,10 +7,12 @@ test: checkparens bytecompile checkpy shellcheck
 check: test
 
 checkparens:
-	$(EMACS) --batch --eval '(find-file "embr.el")' --eval '(check-parens)' && echo "OK: parens balanced"
+	$(EMACS) --batch --eval '(find-file "embr.el")' --eval '(check-parens)' && echo "OK: embr.el parens balanced"
+	$(EMACS) --batch --eval '(find-file "embr-passwd.el")' --eval '(check-parens)' && echo "OK: embr-passwd.el parens balanced"
 
 bytecompile:
 	$(EMACS) --batch -L . -f batch-byte-compile embr.el && rm -f embr.elc && echo "OK: embr.el byte-compiles cleanly"
+	$(EMACS) --batch -L . -f batch-byte-compile embr-passwd.el && rm -f embr-passwd.elc && echo "OK: embr-passwd.el byte-compiles cleanly"
 
 checkpy:
 	$(PYTHON) -m py_compile embr.py && echo "OK: embr.py syntax valid"

@@ -186,6 +186,46 @@ uBlock Origin and Dark Reader are Chromium extensions. After installing them, th
 
 To disable an extension temporarily, switch to `'headed` mode and visit `chrome://extensions`.
 
+## Password Manager
+
+`embr-passwd.el` is a local GPG-encrypted password vault. Credentials are stored in a JSON file encrypted with your GPG key.
+
+### Setup
+
+1. [Generate a GPG key](https://docs.github.com/en/authentication/managing-commit-signature-verification/generating-a-new-gpg-key) if you do not have one. Give it ultimate trust: `gpg --edit-key KEYID trust` (select 5).
+2. Set your key ID and run init:
+
+```elisp
+(setq embr-passwd-encrypt-to "YOUR_GPG_KEY_ID")
+```
+
+3. `M-x embr-passwd-init` creates an empty vault at `embr-passwd-file` (defaults to `~/Documents/passwd.json.gpg`).
+
+### Workflow
+
+Need to register on a site? `M-x embr-passwd-generate` creates a password with `pwgen` and copies it to the kill ring. Paste it into the signup form. Then `M-x embr-passwd-add` to save the credentials before you forget. Leave the password prompt empty during add and it generates one for you.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `embr-passwd-init` | Create empty vault |
+| `embr-passwd-add` | Add site/login/password/notes (empty password generates one) |
+| `embr-passwd-remove` | Remove entry by site |
+| `embr-passwd-get` | Copy password for a site to kill ring |
+| `embr-passwd-list` | Show all sites in the vault |
+| `embr-passwd-generate` | Generate a password and copy to kill ring |
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `embr-passwd-encrypt-to` | nil | GPG key ID (required) |
+| `embr-passwd-file` | `~/Documents/passwd.json.gpg` | Vault file location |
+| `embr-passwd-length` | 12 | Generated password length |
+
+Requires `pwgen` for password generation.
+
 ## FAQ
 
 ### Why CloakBrowser?
